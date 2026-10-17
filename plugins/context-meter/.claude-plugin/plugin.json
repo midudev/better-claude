@@ -1,0 +1,21 @@
+{
+  "name": "context-meter",
+  "version": "0.1.0",
+  "description": "How full the context window is, what the last message and the session cost, the session's tokens and the running subagents, in one line under the prompt.",
+  "author": {
+    "name": "Miguel Ángel Durán (midudev)",
+    "url": "https://github.com/midudev"
+  },
+  "homepage": "https://github.com/midudev/better-claude",
+  "repository": "https://github.com/midudev/better-claude",
+  "license": "MIT",
+  "keywords": [
+    "context",
+    "cost",
+    "tokens",
+    "agents",
+    "status",
+    "mod"
+  ],
+  "types": "./types/index.d.ts"
+}

@@ -44,6 +44,13 @@
       "category": "productivity"
     },
     {
+      "name": "context-meter",
+      "source": "./plugins/context-meter",
+      "description": "The context window as a bar, the cost of the last message and the session, and the running subagents, under the prompt.",
+      "version": "0.1.0",
+      "category": "productivity"
+    },
+    {
       "name": "image-preview",
       "source": "./plugins/image-preview",
       "description": "Hover a pasted [Image #N] to see the picture: above the prompt while you write, and on the prompts you sent.",

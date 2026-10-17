@@ -15,6 +15,7 @@ Plugins and mods for Claude Code by midudev, one per folder in [`plugins/`](plug
 | **Use Haiku** | Start a prompt with `_` and that turn runs on Haiku. | [`plugins/use-haiku/`](plugins/use-haiku/README.md) |
 | **Think Hard** | Start a prompt with `+` and that turn thinks at max effort. | [`plugins/think-hard/`](plugins/think-hard/README.md) |
 | **Token Meter** | Each turn's tokens and the session total, in color under the prompt. | [`plugins/token-meter/`](plugins/token-meter/README.md) |
+| **Context Meter** | How full the context window is, the cost of the last message and the session, and the running subagents, in one line under the prompt. | [`plugins/context-meter/`](plugins/context-meter/README.md) |
 -->
 
 ## Install
@@ -31,6 +32,7 @@ Plugins and mods for Claude Code by midudev, one per folder in [`plugins/`](plug
 /plugin install use-haiku@better-claude
 /plugin install think-hard@better-claude
 /plugin install token-meter@better-claude
+/plugin install context-meter@better-claude
 -->
 
 This repository is the marketplace: [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json) lists each plugin folder as a source.
