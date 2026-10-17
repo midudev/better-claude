@@ -17,7 +17,7 @@ A Claude Code command: `/commit` asks what to do, then splits your changes into 
 | **Commit only** | Commits on the current branch and stops there. |
 | **Commit on a new branch** | Creates a branch named after the changes (`feat/side-panel`), commits there and pushes it. |
 
-- Reads the branch, `git status` and `git diff HEAD` before Claude starts.
+- Reads the branch, `git status` and `git diff HEAD` before Claude starts (the staged diff in a repo with no commits yet, where `HEAD` does not exist).
 - Never creates or switches branches unless you pick **Commit on a new branch**.
 - Stages only each group's files, never `.env*` or secrets, and commits as `type(scope): summary`: English, imperative, under 72 characters, with a body only when the why is not obvious.
 - Never adds `Co-Authored-By`, Claude Code session links (`Claude-Session`) or any Claude or Anthropic attribution.

@@ -1,6 +1,6 @@
 {
   "name": "commit",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "/commit asks whether to commit and push, only commit, or commit on a new branch, then splits your changes into Conventional Commits, one per logical group, on the branch you are on. Runs on Haiku 5.5.",
   "author": {
     "name": "Miguel Ángel Durán (midudev)",

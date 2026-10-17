@@ -7,7 +7,7 @@ allowed-tools: Bash(git *), AskUserQuestion
 Current state:
 - Branch: !`git branch --show-current`
 - Status: !`git status --short`
-- Diff: !`git diff HEAD`
+- Diff: !`git diff HEAD 2>/dev/null || git diff --cached`
 
 First, ask with AskUserQuestion (one question, header "Commit", single select) what to do with these changes, these three options in this order:
 1. **Commit + push (Recommended)**: commit on the current branch, then push it.
