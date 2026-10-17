@@ -5,7 +5,7 @@
     "url": "https://github.com/midudev"
   },
   "metadata": {
-    "description": "Claude Code plugins and mods by midudev: After, a prompt queue; Use Haiku and Think Hard, prompt prefixes for one turn; Token Meter and Sub Meter, tokens and subscription usage at a glance; Image Preview, hover a pasted image to see it; Commit, Conventional Commits and a push on Haiku"
+    "description": "Claude Code plugins and mods by midudev: After, a prompt queue; Use Haiku and Think Hard, prompt prefixes for one turn; Token Meter and Sub Meter, tokens and subscription usage at a glance; Image Preview, hover a pasted image to see it; Time Machine, a git snapshot of every turn to go back to; Commit, Conventional Commits and a push on Haiku"
   },
   "plugins": [
     {
@@ -55,6 +55,13 @@
       "source": "./plugins/commit",
       "description": "/commit asks commit + push, commit only or a new branch, then splits your changes into Conventional Commits on Haiku 5.5.",
       "version": "0.2.0",
+      "category": "productivity"
+    },
+    {
+      "name": "time-machine",
+      "source": "./plugins/time-machine",
+      "description": "Every turn that changes files is a git snapshot: /timeline puts the working tree back as before any turn, Bash changes included. Undoable.",
+      "version": "0.1.0",
       "category": "productivity"
     }
   ]

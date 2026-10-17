@@ -1,0 +1,29 @@
+{
+  "name": "time-machine",
+  "version": "0.1.0",
+  "description": "Every turn that changes files is a git snapshot off your history: /timeline shows them and puts the working tree back as it was before any turn, Bash changes included. Undoable.",
+  "author": {
+    "name": "DiegoMarty",
+    "url": "https://github.com/DiegoMarty"
+  },
+  "homepage": "https://github.com/midudev/better-claude",
+  "repository": "https://github.com/midudev/better-claude",
+  "license": "MIT",
+  "keywords": [
+    "git",
+    "undo",
+    "checkpoint",
+    "rewind",
+    "snapshot",
+    "mod"
+  ],
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "keepDays": {
+      "type": "number",
+      "title": "Keep snapshots for (days)",
+      "description": "Snapshots older than this are dropped when a session starts; git's next gc frees their space.",
+      "default": 7
+    }
+  }
+}

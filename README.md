@@ -11,6 +11,7 @@ Plugins and mods for Claude Code by midudev, one per folder in [`plugins/`](plug
 | **Commit** | `/commit` asks commit + push, commit only or a new branch, then splits your changes into Conventional Commits, on Haiku 5.5. | [`plugins/commit/`](plugins/commit/README.md) |
 
 <!-- Hidden until they are on the web:
+| **Time Machine** | Every turn that changes files is a git snapshot: `/timeline` puts the files back as before any turn, Bash changes included. | [`plugins/time-machine/`](plugins/time-machine/README.md) |
 | **After** | A prompt queue: `/after <task>` runs it when Claude finishes, without steering it. | [`plugins/after/`](plugins/after/README.md) |
 | **Use Haiku** | Start a prompt with `_` and that turn runs on Haiku. | [`plugins/use-haiku/`](plugins/use-haiku/README.md) |
 | **Think Hard** | Start a prompt with `+` and that turn thinks at max effort. | [`plugins/think-hard/`](plugins/think-hard/README.md) |
@@ -27,6 +28,7 @@ Plugins and mods for Claude Code by midudev, one per folder in [`plugins/`](plug
 ```
 
 <!-- Hidden until they are on the web:
+/plugin install time-machine@better-claude
 /plugin install after@better-claude
 /plugin install use-haiku@better-claude
 /plugin install think-hard@better-claude
@@ -37,6 +39,6 @@ This repository is the marketplace: [`.claude-plugin/marketplace.json`](.claude-
 
 ## Development
 
-Each plugin is its own folder with its own manifest. One `package.json` at the root runs everything: `npm test`, `npm run validate`, `npm run test:node` (After's unit tests) and `npm run test:mod` (every plugin's tests against the engine).
+Each plugin is its own folder with its own manifest. One `package.json` at the root runs everything: `npm test`, `npm run validate`, `npm run test:node` (After's and Time Machine's unit tests) and `npm run test:mod` (every plugin's tests against the engine).
 
 MIT © Miguel Ángel Durán (midudev)

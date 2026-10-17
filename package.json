@@ -1,7 +1,7 @@
 {
   "name": "better-claude",
   "version": "0.2.0",
-  "description": "Plugins and mods for Claude Code by midudev: After, Use Haiku, Think Hard, Token Meter, Sub Meter, Image Preview and Commit.",
+  "description": "Plugins and mods for Claude Code by midudev: After, Use Haiku, Think Hard, Token Meter, Sub Meter, Image Preview, Time Machine and Commit.",
   "type": "module",
   "license": "MIT",
   "author": "Miguel Ángel Durán (midudev)",
@@ -23,11 +23,11 @@
   },
   "scripts": {
     "test": "npm run test:node && npm run test:mod",
-    "test:node": "node --test \"plugins/after/test/*.test.js\"",
-    "test:mod": "claude plugin test ./plugins/after && claude plugin test ./plugins/use-haiku && claude plugin test ./plugins/think-hard && claude plugin test ./plugins/token-meter && claude plugin test ./plugins/sub-meter && claude plugin test ./plugins/image-preview",
+    "test:node": "node --test \"plugins/after/test/*.test.js\" \"plugins/time-machine/test/*.test.js\"",
+    "test:mod": "claude plugin test ./plugins/after && claude plugin test ./plugins/use-haiku && claude plugin test ./plugins/think-hard && claude plugin test ./plugins/token-meter && claude plugin test ./plugins/sub-meter && claude plugin test ./plugins/image-preview && claude plugin test ./plugins/time-machine",
     "test:watch": "node --test --watch \"plugins/after/test/*.test.js\"",
     "typecheck": "npx -y -p typescript@7 tsc -p plugins/after",
-    "validate": "claude plugin validate . && claude plugin validate ./plugins/after && claude plugin validate ./plugins/use-haiku && claude plugin validate ./plugins/think-hard && claude plugin validate ./plugins/token-meter && claude plugin validate ./plugins/sub-meter && claude plugin validate ./plugins/image-preview && claude plugin validate ./plugins/commit",
+    "validate": "claude plugin validate . && claude plugin validate ./plugins/after && claude plugin validate ./plugins/use-haiku && claude plugin validate ./plugins/think-hard && claude plugin validate ./plugins/token-meter && claude plugin validate ./plugins/sub-meter && claude plugin validate ./plugins/image-preview && claude plugin validate ./plugins/commit && claude plugin validate ./plugins/time-machine",
     "eval": "node plugins/after/scripts/eval-haiku.js"
   }
 }
