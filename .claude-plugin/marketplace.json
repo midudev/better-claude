@@ -47,7 +47,7 @@
       "name": "image-preview",
       "source": "./plugins/image-preview",
       "description": "Hover a pasted [Image #N] to see the picture: above the prompt while you write, and on the prompts you sent.",
-      "version": "0.1.1",
+      "version": "0.2.0",
       "category": "productivity"
     },
     {

@@ -45,7 +45,7 @@ const posix = (path: string) => path.replace(/^[A-Za-z]:(?=[\\/])/, '').replaceA
  */
 function world (
   on: On,
-  { files = { '1.png': 300 * 1024 }, draft = '', env = {}, window = 'shown', system = 'Darwin', temp = '/tmp/claude-501' }: { files?: Record<string, number>; draft?: string; env?: Record<string, string>; window?: 'shown' | 'error'; system?: string; temp?: string } = {}
+  { files = { '1.png': 300 * 1024 }, draft = '', env = {}, window = 'shown', system = 'Darwin', temp = '/tmp/claude-501', missing = [] }: { files?: Record<string, number>; draft?: string; env?: Record<string, string>; window?: 'shown' | 'error'; system?: string; temp?: string; missing?: string[] } = {}
 ) {
   const folder = `${temp}/-project-app/s-1`
   const box = { text: draft }
@@ -53,6 +53,10 @@ function world (
   const clock = mock.clock(on, { now: 0 })
   mock.env(on, { TERM_PROGRAM: 'WarpTerminal', ...env })
   const runs: string[][] = []
+  // The variables each run was given, in the order of `runs`.
+  const runEnvs: Record<string, string>[] = []
+  // What `wslpath -w` prints for a path of the WSL distro.
+  const windowsPath = (path: string) => `\\\\wsl.localhost\\Ubuntu${path.replaceAll('/', '\\')}`
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.id', () => ({ value: session.id }))
   on('session.root', () => ({ value: '/project/app' }))
@@ -60,7 +64,9 @@ function world (
   on('prompt.read', () => ({ value: { text: box.text, cursor: box.text.length } }))
   on('process.run', ($, e) => {
     runs.push([...e.argv])
-    return { value: { exitCode: 0, stdout: e.argv[0] === 'id' ? '501\n' : e.argv[0] === 'uname' ? `${system}\n` : '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    runEnvs.push({ ...e.init?.env })
+    const stdout = e.argv[0] === 'id' ? '501\n' : e.argv[0] === 'uname' ? `${system}\n` : e.argv[0] === 'wslpath' ? `${windowsPath(e.argv[2]!)}\n` : ''
+    return { value: { exitCode: missing.includes(e.argv[0]!) ? 127 : 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   on('fs.exists', ($, e) => ({ value: posix(e.path) === `${temp}/-project-app/${session.id}/images` && session.id === 's-1' }))
   on('fs.list', ($, e) => ({
@@ -94,7 +100,7 @@ function world (
     const { Box } = $.ui.resolve(e)
     return <Box key="engine" />
   })
-  return { clock, runs, box, session, windows }
+  return { clock, runs, runEnvs, box, session, windows }
 }
 
 type Drawn = RenderElement & { children?: Drawn[]; props?: { key?: string } }
@@ -604,4 +610,43 @@ test('on Windows a click opens the image in its own viewer', async ($, on) => {
   await ui.pointer({ type: 'up', x: 2, y: 0, button: 'left', in: 'chip:1' })
   await w.clock.settle()
   expect(w.runs).toContainEqual(['explorer', '\\Users\\me\\AppData\\Local\\Temp\\claude\\-project-app\\s-1\\images\\1.png'])
+})
+
+// Under WSL the session is Linux, but the desktop, the pointer and the viewer are Windows'.
+const WSL = { WSL_DISTRO_NAME: 'Ubuntu', DISPLAY: ':0', WSLENV: 'WT_SESSION' }
+
+test('under WSL the window is Windows\' PowerShell, its variables crossing over through WSLENV', async ($, on) => {
+  const w = world(on, { draft: '[Image #1]', system: 'Linux', env: WSL })
+  await startSession($)
+  await w.clock.settle()
+  await point(await band($), 'chip:1')
+  await w.clock.advance(100)
+  expect(w.windows[0]!.argv.slice(0, 6)).toEqual(['powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand'])
+  expect(w.windows[0]!.env.IMAGE_PREVIEW_FILE).toBe(`${FOLDER}/images/1.png`)
+  expect(w.windows[0]!.env.WSLENV).toBe('WT_SESSION:IMAGE_PREVIEW_FILE/p:IMAGE_PREVIEW_SIZE:IMAGE_PREVIEW_LIFE')
+  expect(w.runs).not.toContainEqual(['python3', '-c', 'import tkinter'])
+})
+
+test('under WSL without ImageMagick, Windows\' PowerShell shrinks the picture for the terminal', cells, async ($, on) => {
+  const w = world(on, { draft: '[Image #1]', system: 'Linux', env: WSL, missing: ['magick', 'convert'] })
+  await startSession($)
+  await w.clock.settle()
+  const ui = await band($)
+  await point(ui, 'chip:1')
+  const at = w.runs.findIndex(argv => argv[0] === 'powershell.exe')
+  expect(at).toBeGreaterThan(-1)
+  expect(w.runEnvs[at]).toMatchObject({ IMAGE_PREVIEW_FILE: `${FOLDER}/images/1.png`, IMAGE_PREVIEW_OUT: `${FOLDER}/image-preview/1.bmp`, WSLENV: 'WT_SESSION:IMAGE_PREVIEW_FILE/p:IMAGE_PREVIEW_OUT/p:IMAGE_PREVIEW_FORMAT:IMAGE_PREVIEW_SIZE' })
+  expect(await ui.find({ key: 'image-1' })).toMatchObject({ type: 'Raster' })
+})
+
+test('under WSL a click opens the image in Windows\' viewer', async ($, on) => {
+  const w = world(on, { draft: '[Image #1]', system: 'Linux', env: WSL })
+  await startSession($)
+  await w.clock.settle()
+  const ui = await band($)
+  await ui.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'chip:1' })
+  await ui.pointer({ type: 'up', x: 2, y: 0, button: 'left', in: 'chip:1' })
+  await w.clock.settle()
+  expect(w.runs).toContainEqual(['explorer.exe', '\\\\wsl.localhost\\Ubuntu\\tmp\\claude-501\\-project-app\\s-1\\images\\1.png'])
+  expect(w.runs.some(argv => argv[0] === 'xdg-open')).toBe(false)
 })

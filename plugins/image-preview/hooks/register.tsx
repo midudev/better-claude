@@ -111,6 +111,29 @@ function platformOf ($: Engine) {
   return platform
 }
 
+// Whether the session runs under WSL: Linux, on a Windows desktop.
+let wsl: Promise<boolean> | undefined
+
+/**
+ * Whether the session runs under WSL, asked once. There the session is Linux, but the desktop, the
+ * pointer and the viewer are Windows': the picture is converted, shown and opened by Windows' own.
+ */
+function wslOf ($: Engine) {
+  wsl ??= (async () => (await platformOf($)) === 'linux' && (await $.env.get('WSL_DISTRO_NAME')) !== undefined)()
+  return wsl
+}
+
+/**
+ * A PowerShell command as WSL runs it: as `powershell.exe`, its variables crossing over through
+ * WSLENV, the paths among them (`/p`) turned into their Windows form. Elsewhere, as it is.
+ */
+async function crossing ($: Engine, command: Command): Promise<Command> {
+  if (command.argv[0] !== 'powershell' || !(await wslOf($))) return command
+  const names = Object.keys(command.env ?? {}).map(name => (/^IMAGE_PREVIEW_(FILE|OUT)$/.test(name) ? `${name}/p` : name))
+  const inherited = await $.env.get('WSLENV')
+  return { argv: ['powershell.exe', ...command.argv.slice(1)], env: { ...command.env, WSLENV: [inherited, ...names].filter(Boolean).join(':') } }
+}
+
 /** Forgets what was read in another session: after /clear the ids start again from 1. */
 async function follow ($: Engine) {
   const id = await $.session.id()
@@ -171,8 +194,10 @@ async function fileOf ($: Engine, id: number) {
 
 /** Runs the first converter that works here, and remembers it. */
 async function convert ($: Engine, commandOf: (tool: Tool) => Command) {
-  for (const name of tool ? [tool] : TOOLS[await platformOf($)]) {
-    const { argv, env } = commandOf(name)
+  // Under WSL, Windows' PowerShell converts where ImageMagick is not installed.
+  const tools = (await wslOf($)) ? [...TOOLS.linux, 'powershell' as const] : TOOLS[await platformOf($)]
+  for (const name of tool ? [tool] : tools) {
+    const { argv, env } = await crossing($, commandOf(name))
     const result = await $.process.run(argv, env && { env }).catch(() => undefined)
     if (result?.exitCode === 0) {
       tool = name
@@ -269,6 +294,11 @@ async function fileFor ($: Engine, id: number) {
 async function openImage ($: Engine, id: number) {
   const file = await fileFor($, id)
   if (!file) return
+  if (await wslOf($)) {
+    const path = (await $.process.run(['wslpath', '-w', file]).catch(() => undefined))?.stdout.trim()
+    if (path) await $.process.run(['explorer.exe', path]).catch(() => undefined)
+    return
+  }
   const system = await platformOf($)
   const argv = system === 'macos' ? ['open', '-a', 'Preview', file] : system === 'windows' ? ['explorer', file.replaceAll('/', '\\')] : ['xdg-open', file]
   await $.process.run(argv).catch(() => undefined)
@@ -280,7 +310,7 @@ async function windowCommand ($: Engine, id: number): Promise<Command | undefine
   if (!file) return undefined
   const env = { IMAGE_PREVIEW_FILE: file, IMAGE_PREVIEW_SIZE: String(WINDOW_SIZE), IMAGE_PREVIEW_LIFE: String(WINDOW_LIFE) }
   if (windowing === 'macos') return { argv: ['osascript', '-l', 'JavaScript', '-e', MACOS], env }
-  if (windowing === 'windows') return { argv: powershell(WINDOWS), env }
+  if (windowing === 'windows') return crossing($, { argv: powershell(WINDOWS), env })
   // Tk reads a PNG: the picture shrunk to one, once.
   const cache = `${await sessionFolder($)}/image-preview`
   const out = `${cache}/${id}.window.png`
@@ -554,7 +584,9 @@ export const register: Register = (on, options) => {
     if (options.window !== false && graphics === 'none' && e.isInteractive && !isRemote) {
       const system = await platformOf($)
       if (system === 'macos' || system === 'windows') windowing = system
-      if (system === 'linux' && (await $.env.get('DISPLAY'))) {
+      // Under WSL the window is Windows', by the pointer: not WSLg's, which cannot tell where it is.
+      if (await wslOf($)) windowing = 'windows'
+      else if (system === 'linux' && (await $.env.get('DISPLAY'))) {
         const tk = await $.process.run(['python3', '-c', 'import tkinter']).catch(() => undefined)
         if (tk?.exitCode === 0) windowing = 'linux'
       }

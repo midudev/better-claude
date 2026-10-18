@@ -25,6 +25,7 @@ The picture shows as it is, sharp: a screenshot of text reads as it was. It is s
 | --- | --- | --- |
 | macOS | An AppKit panel with the HUD material, round corners and a shadow, run by `osascript` (JavaScript for Automation) | Nothing to install |
 | Windows | A Windows Forms tool window, run by PowerShell | Nothing to install |
+| WSL | The same Windows Forms window, run by `powershell.exe` from WSL, by the Windows pointer | Nothing to install |
 | Linux | A Tk tooltip window on X11, the picture shrunk to a PNG | Python's Tk (`python3-tk` on Debian and Ubuntu, `python3-tkinter` on Fedora) and ImageMagick |
 
 Turn it off with the **Preview in a window** option (`/config`) to keep the preview in the terminal. Over SSH the window would open on the other machine, so there the terminal draws it. Where the window's program cannot show one, the terminal draws the previews for the rest of the session.
@@ -59,12 +60,14 @@ Warp speaks the kitty graphics protocol, but not the Unicode placeholders Claude
 - The text inside the prompt box can only be colored by a mod, not hovered, so while you write the pointer target is the row above it, not the `[Image #N]` in the box itself.
 - In a sent prompt, the `[Image #N]` takes the pointer and the click in the prompt's first line only, before it would wrap: past that, the mod cannot tell where the line puts it. The `⎿ [Image #N]` rows show the preview but take no click, which Claude Code keeps for itself.
 - A window stays two minutes at most, even with the pointer still on its `[Image #N]`: move off and back on to open it again.
-- A click opens the image with `open -a Preview` on macOS, `explorer` on Windows, `xdg-open` elsewhere.
+- A click opens the image with `open -a Preview` on macOS, `explorer` on Windows, `explorer.exe` under WSL (the path turned into its Windows form by `wslpath -w`), `xdg-open` elsewhere.
 - On Linux the window needs X11 (or XWayland): under Wayland alone there is none, and the terminal draws the card. Under XWayland the window may not stand by the pointer when the terminal is a Wayland window.
-- On Windows the first window compiles a small helper into the temp folder, which takes a second. The Windows window and converter have been written and checked (the scripts parse, the commands are tested) but not yet run on Windows.
+- On Windows the first window compiles a small helper into the temp folder, which takes a second. The Windows window and converter have been written and checked (the scripts parse, the commands are tested) and have been run on Windows from WSL.
+- Under WSL (`WSL_DISTRO_NAME` is set) the session is Linux but the desktop is Windows', so the window, the converter and the viewer are Windows': a WSLg window could not tell where the pointer is over a Windows terminal.
+- Hovering needs the terminal to report mouse motion. A terminal multiplexer between Claude Code and the terminal must pass it on: in testing, herdr 0.9.1 did not, and no preview opened.
 - It reads the images Claude Code stores for the session, in its temp folder (`<CLAUDE_CODE_TMPDIR or /tmp>/claude-<uid>/…/images`; on Windows `<CLAUDE_CODE_TMPDIR or %TEMP%>\claude\…\images`), and keeps its shrunk copies in an `image-preview` folder beside them. Images from a session started before you installed the mod are found too; images from another session are not.
 - A session resumed with `--continue` draws its rows all at once, its prompts apart from the rest; the mod puts them back in order by turns. A turn with no `done` line (one interrupted) can put a card a few rows off.
-- It shrinks the picture with `sips` on macOS, ImageMagick (`magick` or `convert`) on Linux, and ImageMagick or PowerShell on Windows. Without them, the card says it cannot read it.
+- It shrinks the picture with `sips` on macOS, ImageMagick (`magick` or `convert`) on Linux, and ImageMagick or PowerShell on Windows and under WSL (there `powershell.exe`, its variables passed through `WSLENV`). Without them, the card says it cannot read it.
 
 ## How it works
 
