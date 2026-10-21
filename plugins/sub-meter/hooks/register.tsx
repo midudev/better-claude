@@ -1,13 +1,15 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, RenderNode, RenderViewport, SessionRateLimit } from 'claude-code'
+import type { EngineInterface, Register, RenderNode, RenderViewport, SessionContextUsage, SessionRateLimit } from 'claude-code'
 
-import type { Limit } from '../types'
+import type { Context, Limit } from '../types'
 
 const limits = atom({ plugin: 'sub-meter', key: 'limits' } as const, [] as Limit[])
+const context = atom({ plugin: 'sub-meter', key: 'context' } as const, null as Context | null)
 const view = atom({ plugin: 'sub-meter', key: 'view' } as const, 0)
 
 const WINDOWS = ['five_hour', 'seven_day']
 const LABELS: Record<string, string> = { five_hour: '5h', seven_day: 'week' }
+const CONTEXT_LABEL = 'ctx'
 const ROTATE_SECONDS = 8
 const CELLS = 10
 const CYCLE_HINT = /\s*\([^()]+ to cycle\)/
@@ -36,6 +38,20 @@ const windowsOf = (rateLimits: readonly SessionRateLimit[]): Limit[] =>
     const found = rateLimits.find(limit => limit.kind === kind)
     return found ? [{ kind, percentUsed: found.percentUsed, resetsAt: found.resetsAt }] : []
   })
+
+/** The context window's fill, once a response reported one; before that, nothing to show. */
+const contextOf = (usage: SessionContextUsage): Context | null =>
+  usage.tokens === undefined || usage.window <= 0
+    ? null
+    : { tokens: usage.tokens, window: usage.window, percent: usage.percent ?? (usage.tokens / usage.window) * 100 }
+
+/** "840", "8.4k", "84k", "1.2M": a token count, in at most four characters. */
+function short (n: number) {
+  if (n < 1000) return `${n}`
+  if (n < 10_000) return `${(n / 1000).toFixed(1)}k`
+  if (n < 1_000_000) return `${Math.round(n / 1000)}k`
+  return `${(n / 1_000_000).toFixed(1)}M`
+}
 
 /** Whether a drawing beneath shows nothing: no text, no control (the engine's own node draws `modes`, counted apart). */
 function isBlank (node: RenderNode | undefined): boolean {
@@ -86,7 +102,24 @@ async function remember ($: EngineInterface, found: Limit[]) {
   await $.store.set('limits', found)
 }
 
+/** What the meter takes turns showing: each subscription window, then the context window's fill. */
+async function slots ($: EngineInterface, now: number) {
+  const windows = (await read($, limits)).map(limit => {
+    const resetsIn = limit.resetsAt === undefined ? undefined : Date.parse(limit.resetsAt) - now
+    const hasReset = resetsIn !== undefined && resetsIn <= 0
+    return {
+      label: LABELS[limit.kind] ?? limit.kind,
+      percent: hasReset ? 0 : limit.percentUsed,
+      tail: resetsIn !== undefined && !hasReset ? ` ↻ ${until(resetsIn)}` : ''
+    }
+  })
+  const fill = await read($, context)
+  const ctx = fill === null ? [] : [{ label: CONTEXT_LABEL, percent: fill.percent, tail: ` ${short(fill.tokens)}/${short(fill.window)}` }]
+  return [...windows, ...ctx]
+}
+
 export const register: Register = (on, options) => {
+  const showContext = options.showContext !== false
   const hideCycleHint = options.hideCycleHint !== false
   const hideInterruptHint = options.hideInterruptHint !== false
   const rotateSeconds = Number(options.rotateSeconds)
@@ -110,6 +143,8 @@ export const register: Register = (on, options) => {
 
     const usage = await $.session.usage()
     await remember($, windowsOf(usage.rateLimits))
+    // The context window is this session's alone: never kept for the next one.
+    if (showContext) await update($, context, () => contextOf(usage.context))
 
     $.clock.every(rotateMs, () => { void update($, view, n => n + 1) })
     return next(e)
@@ -117,37 +152,34 @@ export const register: Register = (on, options) => {
 
   on('session.measure', async ($, e, next) => {
     await remember($, windowsOf(e.rateLimits))
+    if (showContext) await update($, context, () => contextOf(e.context))
     return next(e)
   })
 
   // Bottom right of the prompt footer: the meter, then what is beneath it (the engine's mode labels,
   // another plugin's switch), so a plugin that draws itself last stays last whichever wraps the other.
-  // Where the row is short the meter gives up its bar, then the time until the reset, then itself.
+  // Where the row is short the meter gives up its bar, then its tail (the time until the reset, the
+  // context window's tokens), then itself.
   on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
-    const all = await read($, limits)
-    if (all.length === 0) return next(e)
-
-    const now = await $.clock.now()
+    const all = await slots($, await $.clock.now())
     const shown = all[(await read($, view)) % all.length]
-    const resetsIn = shown.resetsAt === undefined ? undefined : Date.parse(shown.resetsAt) - now
-    const hasReset = resetsIn !== undefined && resetsIn <= 0
-    const percent = hasReset ? 0 : shown.percentUsed
+    if (shown === undefined) return next(e)
+
+    const { label, percent, tail } = shown
     const filled = Math.round((Math.min(Math.max(percent, 0), 100) / 100) * CELLS)
     const beneath = await next(e)
     const hasBeneath = e.props.modes.length > 0 || !isBlank(beneath)
 
-    const label = LABELS[shown.kind] ?? shown.kind
     const used = ` ${Math.round(percent)}%`
-    const reset = resetsIn !== undefined && !hasReset ? ` ↻ ${until(resetsIn)}` : ''
     const below = widthOfNode(beneath, e.props.modes)
     const room = roomOf(e) - (hasBeneath ? below + SEPARATOR.length : 0) - (holdsPlugin(beneath) ? 0 : AROUND)
     const given = holdsPlugin(beneath) ? Math.max(0, BENEATH_FLOOR - below) : 0
-    const short = widthOf(label + used)
+    const least = widthOf(label + used)
     const fit = [
-      { hasBar: true, hasReset: true, width: short + 1 + CELLS + widthOf(reset) },
-      { hasBar: false, hasReset: true, width: short + widthOf(reset) },
-      { hasBar: false, hasReset: false, width: short }
-    ].find(({ hasReset, width }) => width <= (hasReset ? room - given : room))
+      { hasBar: true, hasTail: true, width: least + 1 + CELLS + widthOf(tail) },
+      { hasBar: false, hasTail: true, width: least + widthOf(tail) },
+      { hasBar: false, hasTail: false, width: least }
+    ].find(({ hasTail, width }) => width <= (hasTail ? room - given : room))
     if (!fit) return beneath
 
     const { Box, Text } = $.ui.resolve(e)
@@ -158,7 +190,7 @@ export const register: Register = (on, options) => {
         {fit.hasBar ? <Text color={colorFor(percent)}>{' ' + '━'.repeat(filled)}</Text> : null}
         {fit.hasBar ? <Text dimColor>{'─'.repeat(CELLS - filled)}</Text> : null}
         <Text>{used}</Text>
-        {fit.hasReset && reset ? <Text dimColor>{reset}</Text> : null}
+        {fit.hasTail && tail ? <Text dimColor>{tail}</Text> : null}
         {hasBeneath ? <Text dimColor>{SEPARATOR}</Text> : null}
         {beneath}
       </Box>

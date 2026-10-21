@@ -1,7 +1,7 @@
 // Mod tests, run against the engine itself: `claude plugin test .`
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
-import type { On, SessionRateLimit } from 'claude-code'
+import type { On, SessionContextUsage, SessionRateLimit } from 'claude-code'
 
 const NOW = Date.parse('2026-10-12T10:00:00Z')
 const at = (ms: number) => new Date(NOW + ms).toISOString()
@@ -10,9 +10,12 @@ const LIMITS: SessionRateLimit[] = [
   { kind: 'five_hour', percentUsed: 58, resetsAt: at(2 * HOUR + 10 * 60_000) },
   { kind: 'seven_day', percentUsed: 23.5, resetsAt: at(76 * HOUR) }
 ]
+const CONTEXT: SessionContextUsage = { window: 200_000, tokens: 84_000, percent: 42 }
+// The context window before the first response: its size, but no fill yet.
+const EMPTY: SessionContextUsage = { window: 200_000 }
 
 /** Everything beneath the mod: the clock, the store, the session's usage and what the engine draws. */
-function world (on: On, rateLimits: SessionRateLimit[] = LIMITS) {
+function world (on: On, rateLimits: SessionRateLimit[] = LIMITS, context: SessionContextUsage = CONTEXT) {
   const clock = mock.clock(on, { now: NOW })
   const store: Record<string, unknown> = {}
   on('store.get', ($, e) => ({ value: store[e.key] }))
@@ -21,7 +24,7 @@ function world (on: On, rateLimits: SessionRateLimit[] = LIMITS) {
     return { value: undefined }
   })
   on('session.start', ($, e) => ({ cwd: e.cwd }))
-  on('session.usage', () => ({ value: { startedAt: NOW, context: { window: 200_000 }, rateLimits } as never }))
+  on('session.usage', () => ({ value: { startedAt: NOW, context, rateLimits } as never }))
   on('session.measure', ($, e) => ({ changed: e.changed }))
   // The engine's own node, as core answers it; with mode labels, a Box the tests find.
   on('ui.render', ($, e) => {
@@ -57,6 +60,50 @@ test('takes turns with the weekly window', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: 'week' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: ' 24%' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: ' ↻ 3d 4h' })).toBeDefined()
+})
+
+test('then with the context window, as a bar with its tokens over the window', async ($, on) => {
+  const w = world(on)
+  await startSession($)
+  await w.clock.advance(16_000)
+  const ui = await footer($)
+  expect(await ui.find({ type: 'Text', text: 'ctx' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' ━━━━' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '──────' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' 42%' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' 84k/200k' })).toBeDefined()
+  await w.clock.advance(8000)
+  expect(await (await footer($)).find({ type: 'Text', text: '5h' })).toBeDefined()
+})
+
+test('before the first response the context window takes no turn', async ($, on) => {
+  const w = world(on, LIMITS, EMPTY)
+  await startSession($)
+  await w.clock.advance(16_000)
+  const ui = await footer($)
+  expect(await ui.find({ type: 'Text', text: '5h' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'ctx' })).toBeUndefined()
+})
+
+test('a new measurement moves the context window, and is not kept for the next session', async ($, on) => {
+  const w = world(on, LIMITS, EMPTY)
+  await startSession($)
+  await $.session.measure({ context: { window: 200_000, tokens: 150_000, percent: 75 }, rateLimits: LIMITS, changed: ['context'] } as never)
+  await w.clock.advance(16_000)
+  const ui = await footer($)
+  expect(await ui.find({ type: 'Text', text: 'ctx' })).toBeDefined()
+  expect((await ui.find({ type: 'Text', text: ' ━━━━━━━━' }))?.props.color).toBe('warning')
+  expect(await ui.find({ type: 'Text', text: ' 150k/200k' })).toBeDefined()
+  expect(w.store.context).toBeUndefined()
+})
+
+test('leaves the context window out when told to', { options: { showContext: false } }, async ($, on) => {
+  const w = world(on)
+  await startSession($)
+  await w.clock.advance(16_000)
+  const ui = await footer($)
+  expect(await ui.find({ type: 'Text', text: '5h' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'ctx' })).toBeUndefined()
 })
 
 test('takes turns as often as rotateSeconds says', { options: { rotateSeconds: 30 } }, async ($, on) => {
@@ -96,18 +143,28 @@ test("keeps another plugin's drawing there after the meter, so it stays last", a
   expect((await ui.findAll({ type: 'Text' })).map(text => text.text).slice(-3)).toEqual([' ↻ 2h 10m', ' · ', '⏵ narrator on'])
 })
 
-test('off a subscription the engine draws its own footer', async ($, on) => {
-  world(on, [])
+test('off a subscription the meter shows the context window alone', async ($, on) => {
+  const w = world(on, [])
+  await startSession($)
+  await w.clock.advance(16_000)
+  const ui = await footer($, ['focus'])
+  expect(await ui.find({ type: 'Text', text: 'ctx' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '5h' })).toBeUndefined()
+})
+
+test('with nothing measured the engine draws its own footer', async ($, on) => {
+  world(on, [], EMPTY)
   await startSession($)
   const ui = await footer($, ['focus'])
   expect(await ui.find({ key: 'engine' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: '5h' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: 'ctx' })).toBeUndefined()
 })
 
 test('a new measurement shows at once and is kept for the next session', async ($, on) => {
-  const w = world(on, [])
+  const w = world(on, [], EMPTY)
   await startSession($)
-  await $.session.measure({ context: { window: 200_000 }, rateLimits: [{ ...LIMITS[0], percentUsed: 91 }], changed: ['rateLimits'] } as never)
+  await $.session.measure({ context: EMPTY, rateLimits: [{ ...LIMITS[0], percentUsed: 91 }], changed: ['rateLimits'] } as never)
   const ui = await footer($)
   const used = await ui.find({ type: 'Text', text: ' ━━━━━━━━━' })
   expect(used?.props.color).toBe('error')
@@ -165,6 +222,17 @@ test('where the row is short the meter gives up its bar, then the reset time, th
   expect(await texts(await footer($, [], 44))).toEqual(['5h', ' 58%'])
   const none = await footer($, [], 35)
   expect(await none.find({ type: 'Text', text: '5h' })).toBeUndefined()
+})
+
+test('where the row is short the context window gives up its bar, then its tokens, then itself', async ($, on) => {
+  const w = world(on)
+  await startSession($)
+  await w.clock.advance(16_000)
+  expect(await texts(await footer($, [], 57))).toEqual(['ctx', ' ━━━━', '──────', ' 42%', ' 84k/200k'])
+  expect(await texts(await footer($, [], 56))).toEqual(['ctx', ' 42%', ' 84k/200k'])
+  expect(await texts(await footer($, [], 45))).toEqual(['ctx', ' 42%'])
+  const none = await footer($, [], 36)
+  expect(await none.find({ type: 'Text', text: 'ctx' })).toBeUndefined()
 })
 
 test('the hint beside the mode label takes its room from the meter', async ($, on) => {
