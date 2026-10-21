@@ -40,7 +40,7 @@
       "name": "sub-meter",
       "source": "./plugins/sub-meter",
       "description": "Subscription usage at the bottom right: the 5-hour and weekly windows, and the context window's fill, as a bar.",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "category": "productivity"
     },
     {

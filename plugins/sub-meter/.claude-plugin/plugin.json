@@ -1,6 +1,6 @@
 {
   "name": "sub-meter",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Your subscription usage at the bottom right of Claude Code: the 5-hour and weekly windows, and the context window's fill, as a bar that takes turns.",
   "author": {
     "name": "Miguel Ángel Durán (midudev)",
