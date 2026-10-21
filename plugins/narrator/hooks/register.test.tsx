@@ -628,7 +628,7 @@ test("WSL speaks with Windows' voices, its variables crossing over", async ($, o
   await turn($)
   await speech
   expect(w.spoken[0]!.argv[0]).toBe('powershell.exe')
-  expect(w.spoken[0]!.env.WSLENV).toBe('NARRATOR_TEXT/u:NARRATOR_LANG/u:NARRATOR_VOICE/u:NARRATOR_SPEED/u:NARRATOR_TICKET/u')
+  expect(w.spoken[0]!.env.WSLENV).toBe('NARRATOR_TEXT:NARRATOR_LANG:NARRATOR_VOICE:NARRATOR_SPEED:NARRATOR_TICKET')
 })
 
 test('Linux speaks with speech-dispatcher in the language Haiku names', async ($, on) => {

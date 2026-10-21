@@ -195,7 +195,7 @@ async function speakersFor ($: EngineInterface, text: string, language: string, 
   const speakers: Command[] = []
   if (await wslOf($)) {
     const inherited = await $.env.get('WSLENV')
-    const crossing = [inherited, 'NARRATOR_TEXT/u', 'NARRATOR_LANG/u', 'NARRATOR_VOICE/u', 'NARRATOR_SPEED/u', 'NARRATOR_TICKET/u'].filter(Boolean).join(':')
+    const crossing = [inherited, 'NARRATOR_TEXT', 'NARRATOR_LANG', 'NARRATOR_VOICE', 'NARRATOR_SPEED', 'NARRATOR_TICKET'].filter(Boolean).join(':')
     speakers.push({ argv: powershell(WINDOWS, 'powershell.exe'), env: { ...env, WSLENV: crossing }, program: 'powershell.exe' })
   }
   const { tool, languages, names } = await linuxSpeechOf($)
