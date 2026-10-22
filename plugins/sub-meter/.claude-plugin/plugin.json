@@ -1,7 +1,7 @@
 {
   "name": "sub-meter",
-  "version": "0.3.0",
-  "description": "Your subscription usage at the bottom right of Claude Code: the 5-hour and weekly windows, as a bar that takes turns.",
+  "version": "0.4.0",
+  "description": "Your subscription usage at the bottom right of Claude Code: the 5-hour and weekly windows, taking turns, side by side or fixed on one of them.",
   "author": {
     "name": "Miguel Ángel Durán (midudev)",
     "url": "https://github.com/midudev"
@@ -12,10 +12,17 @@
   "keywords": ["usage", "subscription", "rate-limits", "status", "mod"],
   "types": "./types/index.d.ts",
   "userConfig": {
+    "display": {
+      "type": "string",
+      "title": "What the meter shows",
+      "description": "rotate: one window at a time, switching every few seconds. both: the 5-hour and weekly windows side by side. session: only the 5-hour window. week: only the weekly window.",
+      "options": ["rotate", "both", "session", "week"],
+      "default": "rotate"
+    },
     "rotateSeconds": {
       "type": "number",
       "title": "Seconds per window",
-      "description": "How long the meter shows each window (5-hour, weekly) before it switches to the other.",
+      "description": "How long the meter shows each window (5-hour, weekly) before it switches to the other. Only used when display is rotate.",
       "default": 8,
       "min": 1
     },

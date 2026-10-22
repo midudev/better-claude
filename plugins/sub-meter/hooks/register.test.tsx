@@ -68,6 +68,68 @@ test('takes turns as often as rotateSeconds says', { options: { rotateSeconds: 3
   expect(await (await footer($)).find({ type: 'Text', text: 'week' })).toBeDefined()
 })
 
+test('both shows the two windows side by side', { options: { display: 'both' } }, async ($, on) => {
+  world(on)
+  await startSession($)
+  const ui = await footer($)
+  expect(await ui.find({ type: 'Text', text: '5h' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '  |  ' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'week' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' 24%' })).toBeDefined()
+})
+
+test('session keeps only the 5-hour window', { options: { display: 'session' } }, async ($, on) => {
+  const w = world(on)
+  await startSession($)
+  await w.clock.advance(30_000)
+  const ui = await footer($)
+  expect(await ui.find({ type: 'Text', text: '5h' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'week' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: '  |  ' })).toBeUndefined()
+})
+
+test('week keeps only the weekly window', { options: { display: 'week' } }, async ($, on) => {
+  const w = world(on)
+  await startSession($)
+  await w.clock.advance(30_000)
+  const ui = await footer($)
+  expect(await ui.find({ type: 'Text', text: 'week' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '5h' })).toBeUndefined()
+})
+
+test('a chosen window the subscription does not report falls back to the one there is', { options: { display: 'session' } }, async ($, on) => {
+  world(on, [LIMITS[1]])
+  await startSession($)
+  expect(await (await footer($)).find({ type: 'Text', text: 'week' })).toBeDefined()
+})
+
+test('an unknown display takes turns, as the default does', { options: { display: 'nonsense' } }, async ($, on) => {
+  const w = world(on)
+  await startSession($)
+  expect(await (await footer($)).find({ type: 'Text', text: '5h' })).toBeDefined()
+  await w.clock.advance(8000)
+  expect(await (await footer($)).find({ type: 'Text', text: 'week' })).toBeDefined()
+})
+
+test('adopts a newer reading another session left in the shared store', { options: { display: 'session' } }, async ($, on) => {
+  const w = world(on)
+  await startSession($)
+  expect(await (await footer($)).find({ type: 'Text', text: ' 58%' })).toBeDefined()
+  w.store.limits = [{ ...LIMITS[0], percentUsed: 91 }, LIMITS[1]]
+  w.store.at = NOW + 1000
+  await w.clock.advance(8000)
+  expect(await (await footer($)).find({ type: 'Text', text: ' 91%' })).toBeDefined()
+})
+
+test('ignores a reading in the shared store that is older than its own', { options: { display: 'session' } }, async ($, on) => {
+  const w = world(on)
+  await startSession($)
+  w.store.limits = [{ ...LIMITS[0], percentUsed: 10 }, LIMITS[1]]
+  w.store.at = NOW - 1000
+  await w.clock.advance(8000)
+  expect(await (await footer($)).find({ type: 'Text', text: ' 58%' })).toBeDefined()
+})
+
 test('alone, with no mode labels, the meter ends the footer', async ($, on) => {
   world(on)
   await startSession($)

@@ -4,11 +4,15 @@ import type { EngineInterface, Register, RenderNode, RenderViewport, SessionRate
 import type { Limit } from '../types'
 
 const limits = atom({ plugin: 'sub-meter', key: 'limits' } as const, [] as Limit[])
-const view = atom({ plugin: 'sub-meter', key: 'view' } as const, 0)
+const view = atom({ plugin: 'sub-meter', key: 'view' } as const, 0) // which window the rotating meter shows
+const tick = atom({ plugin: 'sub-meter', key: 'tick' } as const, 0) // redraws the countdown
 
 const WINDOWS = ['five_hour', 'seven_day']
 const LABELS: Record<string, string> = { five_hour: '5h', seven_day: 'week' }
 const ROTATE_SECONDS = 8
+const TICK_MS = 8000
+const DISPLAYS = ['rotate', 'both', 'session', 'week']
+const WINDOW_OF: Record<string, string> = { session: 'five_hour', week: 'seven_day' }
 const CELLS = 10
 const CYCLE_HINT = /\s*\([^()]+ to cycle\)/
 const INTERRUPT_HINT = /\s*esc to interrupt/
@@ -19,6 +23,7 @@ const FOOTER_PADDING = 4
 const FOOTER_GAP = 2
 const MODE_LABEL = 20
 const SEPARATOR = ' · '
+const BETWEEN = '  |  '
 // Room left, when nothing of another plugin is beneath, for one that may wrap the meter and draw
 // after it: Narrator's narrowest switch (`⏵`) and its separator.
 const AROUND = 1 + SEPARATOR.length
@@ -79,18 +84,42 @@ function until (ms: number) {
   return `${Math.floor(hours / 24)}d ${hours % 24}h`
 }
 
+// When the reading this session shows was taken; the shared store carries the newest one of any session.
+let seenAt = 0
+
 /** Keeps the latest reading for the meter, and for the next session until a response reports again. */
 async function remember ($: EngineInterface, found: Limit[]) {
   if (found.length === 0) return
+  seenAt = await $.clock.now()
   await update($, limits, () => found)
   await $.store.set('limits', found)
+  await $.store.set('at', seenAt) // after the limits, so a reader that sees the new time finds the new limits
+}
+
+/** Adopts the reading another session left in the shared store, when it is newer than ours. */
+async function syncFromStore ($: EngineInterface) {
+  const at = Number(await $.store.get('at')) || 0
+  if (at <= seenAt) return
+  const saved = await $.store.get('limits')
+  if (!Array.isArray(saved)) return
+  seenAt = at
+  await update($, limits, () => saved as Limit[])
+}
+
+/** The windows to draw: all of them, the one the rotation is on, or the one chosen. With fewer than two readings, whatever there is. */
+function visible (all: Limit[], display: string, index: number): Limit[] {
+  if (display === 'both' || all.length < 2) return all
+  if (display === 'rotate') return [all[index % all.length]]
+  return all.filter(limit => limit.kind === WINDOW_OF[display])
 }
 
 export const register: Register = (on, options) => {
+  seenAt = 0
   const hideCycleHint = options.hideCycleHint !== false
   const hideInterruptHint = options.hideInterruptHint !== false
   const rotateSeconds = Number(options.rotateSeconds)
   const rotateMs = (rotateSeconds > 0 ? rotateSeconds : ROTATE_SECONDS) * 1000
+  const display = DISPLAYS.includes(String(options.display)) ? String(options.display) : 'rotate'
   const hidden = [...(hideCycleHint ? [CYCLE_HINT] : []), ...(hideInterruptHint ? [INTERRUPT_HINT] : [])]
 
   /** The hint line without the parts hidden, and without the empty parts they leave. */
@@ -107,11 +136,17 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     const saved = await $.store.get('limits')
     if (Array.isArray(saved)) await update($, limits, () => saved as Limit[])
+    seenAt = Number(await $.store.get('at')) || 0
 
     const usage = await $.session.usage()
     await remember($, windowsOf(usage.rateLimits))
 
-    $.clock.every(rotateMs, () => { void update($, view, n => n + 1) })
+    // Another session's reading shows up within TICK_MS of being stored.
+    $.clock.every(TICK_MS, () => {
+      void syncFromStore($).catch(() => {}) // a failed read keeps the reading on screen
+      void update($, tick, n => n + 1)
+    })
+    if (display === 'rotate') $.clock.every(rotateMs, () => { void update($, view, n => n + 1) })
     return next(e)
   })
 
@@ -126,26 +161,33 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
     const all = await read($, limits)
     if (all.length === 0) return next(e)
+    const shown = visible(all, display, await read($, view))
+    if (shown.length === 0) return next(e)
+    await read($, tick) // subscribes this drawing to the countdown tick
 
     const now = await $.clock.now()
-    const shown = all[(await read($, view)) % all.length]
-    const resetsIn = shown.resetsAt === undefined ? undefined : Date.parse(shown.resetsAt) - now
-    const hasReset = resetsIn !== undefined && resetsIn <= 0
-    const percent = hasReset ? 0 : shown.percentUsed
-    const filled = Math.round((Math.min(Math.max(percent, 0), 100) / 100) * CELLS)
     const beneath = await next(e)
     const hasBeneath = e.props.modes.length > 0 || !isBlank(beneath)
 
-    const label = LABELS[shown.kind] ?? shown.kind
-    const used = ` ${Math.round(percent)}%`
-    const reset = resetsIn !== undefined && !hasReset ? ` ↻ ${until(resetsIn)}` : ''
+    const windows = shown.map(limit => {
+      const resetsIn = limit.resetsAt === undefined ? undefined : Date.parse(limit.resetsAt) - now
+      const hasReset = resetsIn !== undefined && resetsIn <= 0
+      const percent = hasReset ? 0 : limit.percentUsed
+      const filled = Math.round((Math.min(Math.max(percent, 0), 100) / 100) * CELLS)
+      const label = LABELS[limit.kind] ?? limit.kind
+      const used = ` ${Math.round(percent)}%`
+      const reset = resetsIn !== undefined && !hasReset ? ` ↻ ${until(resetsIn)}` : ''
+      return { kind: limit.kind, label, percent, filled, used, reset, short: widthOf(label + used) }
+    })
     const below = widthOfNode(beneath, e.props.modes)
     const room = roomOf(e) - (hasBeneath ? below + SEPARATOR.length : 0) - (holdsPlugin(beneath) ? 0 : AROUND)
     const given = holdsPlugin(beneath) ? Math.max(0, BENEATH_FLOOR - below) : 0
-    const short = widthOf(label + used)
+    const short = windows.reduce((sum, w) => sum + w.short, (windows.length - 1) * BETWEEN.length)
+    const bars = windows.length * (1 + CELLS)
+    const resets = windows.reduce((sum, w) => sum + widthOf(w.reset), 0)
     const fit = [
-      { hasBar: true, hasReset: true, width: short + 1 + CELLS + widthOf(reset) },
-      { hasBar: false, hasReset: true, width: short + widthOf(reset) },
+      { hasBar: true, hasReset: true, width: short + bars + resets },
+      { hasBar: false, hasReset: true, width: short + resets },
       { hasBar: false, hasReset: false, width: short }
     ].find(({ hasReset, width }) => width <= (hasReset ? room - given : room))
     if (!fit) return beneath
@@ -154,11 +196,16 @@ export const register: Register = (on, options) => {
 
     return (
       <Box flexDirection="row">
-        <Text dimColor>{label}</Text>
-        {fit.hasBar ? <Text color={colorFor(percent)}>{' ' + '━'.repeat(filled)}</Text> : null}
-        {fit.hasBar ? <Text dimColor>{'─'.repeat(CELLS - filled)}</Text> : null}
-        <Text>{used}</Text>
-        {fit.hasReset && reset ? <Text dimColor>{reset}</Text> : null}
+        {windows.map((w, i) => (
+          <Box flexDirection="row" key={w.kind}>
+            {i > 0 ? <Text dimColor>{BETWEEN}</Text> : null}
+            <Text dimColor>{w.label}</Text>
+            {fit.hasBar ? <Text color={colorFor(w.percent)}>{' ' + '━'.repeat(w.filled)}</Text> : null}
+            {fit.hasBar ? <Text dimColor>{'─'.repeat(CELLS - w.filled)}</Text> : null}
+            <Text>{w.used}</Text>
+            {fit.hasReset && w.reset ? <Text dimColor>{w.reset}</Text> : null}
+          </Box>
+        ))}
         {hasBeneath ? <Text dimColor>{SEPARATOR}</Text> : null}
         {beneath}
       </Box>

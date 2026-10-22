@@ -3,6 +3,6 @@ export type Limit = { kind: string; percentUsed: number; resetsAt?: string }
 
 declare module 'claude-code' {
   interface PluginState {
-    'sub-meter': { limits: Limit[]; view: number }
+    'sub-meter': { limits: Limit[]; view: number; tick: number }
   }
 }

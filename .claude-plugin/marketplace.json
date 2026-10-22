@@ -39,8 +39,8 @@
     {
       "name": "sub-meter",
       "source": "./plugins/sub-meter",
-      "description": "Subscription usage at the bottom right: the 5-hour and weekly windows, as a bar.",
-      "version": "0.3.0",
+      "description": "Subscription usage at the bottom right: the 5-hour and weekly windows, taking turns, side by side or fixed on one of them.",
+      "version": "0.4.0",
       "category": "productivity"
     },
     {
