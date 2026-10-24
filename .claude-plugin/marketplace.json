@@ -61,7 +61,7 @@
       "name": "commit",
       "source": "./plugins/commit",
       "description": "/commit asks commit + push, commit only or a new branch, then splits your changes into Conventional Commits on Haiku 5.5.",
-      "version": "0.2.2",
+      "version": "0.3.0",
       "category": "productivity"
     },
     {

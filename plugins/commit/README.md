@@ -19,7 +19,7 @@ A Claude Code command: `/commit` asks what to do, then splits your changes into 
 
 - Reads the branch, `git status` and `git diff HEAD` before Claude starts (the staged diff in a repo with no commits yet, where `HEAD` does not exist).
 - Never creates or switches branches unless you pick **Commit on a new branch**.
-- Stages only each group's files (unstaging with `git reset` first if other files are already staged), never `.env*` or secrets, and commits as `type(scope): summary`: English, imperative, under 72 characters, with a body only when the why is not obvious.
+- Stages only each group's files (unstaging with `git reset` first if other files are already staged), never `.env*` or secrets, and commits as `type(scope): summary`: in the configured language (English by default), imperative, under 72 characters, with a body only when the why is not obvious.
 - Never adds `Co-Authored-By`, Claude Code session links (`Claude-Session`) or any Claude or Anthropic attribution.
 - Pushes with `git push -u origin HEAD`. With no remote, or a failed push, it reports the error and stops.
 - Runs `git` and asks its one question, nothing else (`allowed-tools: Bash(git *), AskUserQuestion`). Where it cannot ask, as in `claude -p "/commit"`, it commits and pushes.
