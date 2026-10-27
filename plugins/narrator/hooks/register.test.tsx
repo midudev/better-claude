@@ -4,6 +4,7 @@ import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import { languageOf } from './register'
+import { WINDOWS } from './speaker'
 import { finalQuestion, guessLanguage, parseNarration, plain, withQuestion } from './text'
 
 const USAGE = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
@@ -18,7 +19,7 @@ type World = {
   table?: string
   processErrors?: string[]
   unknownVoices?: string[]
-  speaker?: 'speaks' | 'talks on' | 'fails'
+  speaker?: 'speaks' | 'talks on' | 'fails' | 'falls back'
   /** How many narrations of other windows the speaker says wait their turn behind it. */
   waiting?: number
   hasEngineVoice?: boolean
@@ -46,6 +47,7 @@ function world (on: On, { system = 'Darwin', env = {}, reply = 'es\nHe añadido 
   const efforts: unknown[] = []
   const toasts: string[] = []
   const commandHints: string[] = []
+  const runs: string[][] = []
   let heard: () => void = () => undefined
   // Resolves when the next thing is said, by a program or by the engine.
   const nextSpeech = () => new Promise<void>(resolve => { heard = resolve })
@@ -81,6 +83,7 @@ function world (on: On, { system = 'Darwin', env = {}, reply = 'es\nHe añadido 
     return { value: reply === null ? { isAnswered: false as const, reason: 'empty-reply' as const, usage: USAGE } : { isAnswered: true as const, text: reply, usage: USAGE } }
   })
   on('process.run', ($, e) => {
+    runs.push([...e.argv])
     let stdout = ''
     if (e.argv[0] === 'uname') stdout = `${system}\n`
     else if (e.argv[0] === 'sh') stdout = tools
@@ -97,6 +100,11 @@ function world (on: On, { system = 'Darwin', env = {}, reply = 'es\nHe añadido 
       if (speaker === 'fails') {
         yield { stream: 'stdout' as const, text: 'error: no voice\n' }
         return { value: { code: 1, signal: null } }
+      }
+      if (speaker === 'falls back') {
+        yield { stream: 'stdout' as const, text: 'voice my-voice\nvoice Luisa\n' }
+        heard()
+        return { value: { code: 0, signal: null } }
       }
       const wanted = e.env?.NARRATOR_VOICE ?? ''
       yield { stream: 'stdout' as const, text: `pid 42\n${unknownVoices.includes(wanted) ? `no voice ${wanted}\n` : ''}voice Luisa\n${waiting > 0 ? `waiting ${waiting}\n` : ''}` }
@@ -120,7 +128,7 @@ function world (on: On, { system = 'Darwin', env = {}, reply = 'es\nHe añadido 
   const settled = async () => {
     for (let i = 0; i < 20; i++) await clock.advance(0)
   }
-  return { clock, store: kept, spoken, said, prompts, systems, efforts, toasts, commandHints, nextSpeech, settled, setRecap: (text: string) => { currentRecap = text } }
+  return { clock, store: kept, spoken, said, prompts, systems, efforts, toasts, commandHints, runs, nextSpeech, settled, setRecap: (text: string) => { currentRecap = text } }
 }
 
 /** An answer too long to be read as it is: the narrator has a model write what to say. */
@@ -522,14 +530,41 @@ test('a speak command runs on Linux too', { options: { command: 'my-voice' } }, 
   expect(behindLine(w.spoken[0]!).slice(4)).toEqual(['sh', '-c', 'exec my-voice "$1"', 'narrator-command', 'He añadido el narrador y los tests pasan.'])
 })
 
-test('on Windows a speak command is left aside: the system voice speaks', { options: { command: 'my-voice' } }, async ($, on) => {
+test('on Windows a speak command runs through PowerShell with the narration and its settings', { options: { command: 'my-voice --quiet' } }, async ($, on) => {
   const w = world(on, { system: 'Windows_NT', env: { OS: 'Windows_NT' }, store: { enabled: true } })
   await startSession($)
   const speech = w.nextSpeech()
   await turn($)
   await speech
   expect(w.spoken[0]!.argv[0]).toBe('powershell')
-  expect(w.spoken[0]!.env.NARRATOR_SPEAKER).toBeUndefined()
+  expect(w.spoken[0]!.env).toMatchObject({
+    NARRATOR_SPEAKER: 'my-voice --quiet',
+    NARRATOR_TEXT: 'He añadido el narrador y los tests pasan.',
+    NARRATOR_LANG: 'es',
+    NARRATOR_VOICE: '',
+    NARRATOR_SPEED: '1.3',
+    NARRATOR_TICKET: '0000000000000'
+  })
+})
+
+test('when a Windows speak command fails, the system fallback is the voice that finished', { options: { command: 'my-voice' } }, async ($, on) => {
+  const w = world(on, { env: { OS: 'Windows_NT' }, speaker: 'falls back' })
+  await startSession($)
+  const result = await narrator($, 'test')
+  expect(result.text).toBe('Narrator: previewed Luisa.')
+  expect(w.spoken[0]!.env.NARRATOR_SPEAKER).toBe('my-voice')
+})
+
+test('stopping a Windows speak command kills its whole process tree', { options: { command: 'my-voice' } }, async ($, on) => {
+  const w = world(on, { env: { OS: 'Windows_NT' }, speaker: 'talks on' })
+  await startSession($)
+  const speech = w.nextSpeech()
+  const preview = narrator($, 'test')
+  await speech
+  await $.prompt.submit({ text: 'stop it', wait: false, origin: { kind: 'composer' } })
+  await w.clock.advance(100)
+  expect((await preview).text).toBe('Narrator: preview stopped.')
+  expect(w.runs).toContainEqual(['taskkill.exe', '/PID', '42', '/T', '/F'])
 })
 
 test('with no language set, the switch shows none and the narrator follows the request', async ($, on) => {
@@ -1060,4 +1095,13 @@ test('a new prompt cuts /narrator read short', async ($, on) => {
   await $.prompt.submit({ text: 'next task', wait: false, origin: { kind: 'composer' } })
   await w.clock.advance(100)
   expect(w.spoken[0]!.isEnded).toBe(true)
+})
+
+test('the Windows speaker never interpolates narration into command source', () => {
+  expect(WINDOWS).not.toContain('$quotedText')
+  expect(WINDOWS).toContain("' $env:NARRATOR_TEXT'")
+  expect(WINDOWS).toContain('Get-Command -Name $program')
+  expect(WINDOWS).toContain('$resolved.Path')
+  expect(WINDOWS).toContain("@('.cmd', '.bat')")
+  expect(WINDOWS).toContain("@('cmd', 'cmd.exe')")
 })

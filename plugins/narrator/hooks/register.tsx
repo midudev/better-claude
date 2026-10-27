@@ -201,13 +201,14 @@ const inLine = (command: Command): Command => ({ ...command, argv: ['sh', '-c', 
 async function speakersFor ($: EngineInterface, text: string, language: string, voice: string, ticket: string): Promise<Command[]> {
   const env = { NARRATOR_TEXT: text, NARRATOR_LANG: language, NARRATOR_VOICE: voice, NARRATOR_SPEED: String(settings.speed), NARRATOR_TICKET: ticket }
   const system = await platformOf($)
-  // A speak command of the person's own, run by the shell with the narration as its last argument.
+  // A speak command of the person's own, run by the system shell with the narration last. On
+  // Windows the PowerShell speaker runs it after taking Windows' shared line and falls back itself.
   if (settings.command && system !== 'windows') {
     const argv = ['sh', '-c', LINUX, 'narrator', 'sh', '-c', `exec ${settings.command} "$1"`, 'narrator-command', text]
     return [inLine({ argv, env: { ...env, NARRATOR_SPEAKER: settings.command }, program: settings.command })]
   }
   if (system === 'macos') return [inLine({ argv: ['osascript', '-l', 'JavaScript', '-e', MACOS], env, program: 'osascript' })]
-  if (system === 'windows') return [{ argv: powershell(WINDOWS), env, program: 'powershell' }]
+  if (system === 'windows') return [{ argv: powershell(WINDOWS), env: settings.command ? { ...env, NARRATOR_SPEAKER: settings.command } : env, program: 'powershell' }]
   if (system !== 'linux') return []
 
   const speakers: Command[] = []
@@ -343,16 +344,19 @@ async function play ($: EngineInterface, narration: Narration, command: Command)
       await showSpeech($)
     }
   }
-  const voice = /^voice (.+?)\r?$/m.exec(said)?.[1]
+  // A custom Windows command can fail after naming itself, then the system synthesizer names the
+  // voice it falls back to. The last voice line is therefore the one that actually finished.
+  const voice = [...said.matchAll(/^voice (.+?)\r?$/gm)].at(-1)?.[1]
   // Behind others for too long: the line dropped it, and nothing else should say it now.
   if (/^skipped\r?$/m.test(said)) {
     $.ui.log('narrator: not said, the line of narrations from other sessions was too long', { to: 'debug' })
     return { voice: '', isFallback: false, isSkipped: true }
   }
   failure ||= /^error.*$/m.exec(said)?.[0] ?? (voice ? '' : `${command.program} said nothing`)
-  // Under WSL the Windows side outlives its end of the pipe: end it by its id.
+  // End the whole Windows process tree: under WSL its side outlives the pipe, and a native custom
+  // speak command is a child of PowerShell which would otherwise outlive its supervisor.
   const pid = /^pid (\d+)/m.exec(said)?.[1]
-  if (!narration.isActive && pid && command.program === 'powershell.exe') {
+  if (!narration.isActive && pid && (command.program === 'powershell' || command.program === 'powershell.exe')) {
     await $.process.run(['taskkill.exe', '/PID', pid, '/T', '/F']).catch(() => undefined)
   }
   if (!narration.isActive) return undefined

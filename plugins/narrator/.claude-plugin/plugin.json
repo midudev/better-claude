@@ -55,7 +55,7 @@
     "command": {
       "type": "string",
       "title": "Speak command",
-      "description": "A program of your own to say each narration with, in place of the system's voice (macOS and Linux): the shell runs it with the narration as its last argument. Empty: the system's voice.",
+      "description": "A program of your own to say each narration with, in place of the system's voice (macOS, Windows and Linux): the system shell runs it with the narration as its last argument; Windows batch scripts read NARRATOR_TEXT instead. Empty: the system's voice.",
       "default": ""
     }
   }
