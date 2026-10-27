@@ -302,11 +302,12 @@ export const register: Register = (on, options) => {
     await refresh($)
     const snap = await read($, snapshot)
     const all = listed(snap)
-    if (all.length === 0) return { text: snap.error ?? 'No changed files in the worktree.' }
+    const count = snap.changes.length
+    if (count === 0) return { text: snap.error ?? 'No changed files in the worktree.' }
     if (all.length === 1) await openFile($, all[0]!.path)
     else await openList($)
 
-    return { text: all.length === 1 ? `Opened ${all[0]!.path}.` : `${all.length} changed files.` }
+    return { text: all.length === 1 ? `Opened ${all[0]!.path}.` : `${count} changed ${count === 1 ? 'file' : 'files'}.` }
   })
 
   on('tool.call', async ($, e, next) => {
@@ -317,18 +318,20 @@ export const register: Register = (on, options) => {
   })
 
   // Above the prompt, always one row: a summary that opens the list, then as many
-  // files as fit, the rest counted.
+  // files as fit, the rest counted. The summary counts what git reports; the env
+  // files are chips among the rest, and alone they show no row.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
     const snap = await read($, snapshot)
+    if (snap.changes.length === 0) return next(e)
     const all = listed(snap)
-    if (all.length === 0) return next(e)
     const { Box, Text, Button } = $.ui.resolve(e)
     const current = await read($, shown)
     const below = await next(e)
-    const added = all.reduce((sum, one) => sum + (one.added ?? 0), 0)
-    const removed = all.reduce((sum, one) => sum + (one.removed ?? 0), 0)
-    const summary = `⎇ ${all.length} ${all.length === 1 ? 'change' : 'changes'}`
+    const added = snap.changes.reduce((sum, one) => sum + (one.added ?? 0), 0)
+    const removed = snap.changes.reduce((sum, one) => sum + (one.removed ?? 0), 0)
+    const count = snap.changes.length
+    const summary = `⎇ ${count} ${count === 1 ? 'change' : 'changes'}`
     const stats = (one: { added?: number; removed?: number }) =>
       `${one.added ? ` +${one.added}` : ''}${one.removed ? ` -${one.removed}` : ''}`
     // What fits: each chip is "[name]" and its counts, a column between chips.
@@ -440,8 +443,9 @@ export const register: Register = (on, options) => {
     // counts and status letter at the right.
     if (current?.kind === 'files') {
       const all = listed(snap)
-      const added = all.reduce((sum, one) => sum + (one.added ?? 0), 0)
-      const removed = all.reduce((sum, one) => sum + (one.removed ?? 0), 0)
+      const count = snap.changes.length
+      const added = snap.changes.reduce((sum, one) => sum + (one.added ?? 0), 0)
+      const removed = snap.changes.reduce((sum, one) => sum + (one.removed ?? 0), 0)
       const sorted = [...all].sort((a, b) => a.path.localeCompare(b.path))
       return frame(
         <>
@@ -450,7 +454,7 @@ export const register: Register = (on, options) => {
               <Text color={INK.text} bold>
                 Changes
               </Text>
-              <Text color={INK.dim}>{`  ${all.length} ${all.length === 1 ? 'file' : 'files'}`}</Text>
+              <Text color={INK.dim}>{`  ${count} ${count === 1 ? 'file' : 'files'}`}</Text>
               {added > 0 && <Text color={INK.added}> +{added}</Text>}
               {removed > 0 && <Text color={INK.deleted}> −{removed}</Text>}
             </Text>
@@ -461,7 +465,7 @@ export const register: Register = (on, options) => {
               ⎇ {snap.branch || 'worktree'}
             </Text>
           </Box>
-          {all.length === 0 && <Text color={INK.dim}>{snap.error ?? 'No changed files.'}</Text>}
+          {count === 0 && <Text color={INK.dim}>{snap.error ?? 'No changed files.'}</Text>}
           {sorted.slice(0, MAX_LISTED).map(one => {
             const mark = letter(one.code)
             const folder = one.path.includes('/') ? one.path.slice(0, one.path.lastIndexOf('/')) : ''

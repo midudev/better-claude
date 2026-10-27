@@ -86,6 +86,8 @@ test('lists changed files above the prompt and opens one only when picked', asyn
   expect(await band.find({ key: 'chip:notes.md' })).toBeDefined()
   expect(await band.find({ key: 'chip:.env' })).toBeDefined()
   expect(await band.find({ type: 'Text', text: /^ \+2$/ })).toBeDefined()
+  // The summary counts what git reports: the .env is a chip, not a change.
+  expect(await band.find({ type: 'Text', text: '⎇ 2 changes' })).toBeDefined()
   await band.press({ key: 'chip:src/app.ts' })
   expect(opens).toEqual(['worktree-diff'])
   await band.unmount()
@@ -136,4 +138,28 @@ test('lists changed files above the prompt and opens one only when picked', asyn
   await env.input({ key: 'new-var', text: 'DEBUG=1' })
   expect(written['/repo/.env']).toBe('API_URL=http://localhost\nSECRET=xyz\nDEBUG=1\n')
   await env.unmount()
+})
+
+test('shows no row in a clean worktree, even one with a .env', async ($, on) => {
+  on('ui.render', ($, e) => {
+    const { Box } = $.ui.resolve(e)
+    return <Box key="engine" />
+  })
+  on('command.register', () => ({ value: { command: 'worktree' } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('session.cwd', () => ({ value: '/repo' }))
+  on('process.run', (_, e) => {
+    const args = e.argv.join(' ')
+    const stdout = args.includes('rev-parse') ? '/repo\n' : args.includes('branch') ? 'main\n' : ''
+    return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  on('fs.list', () => ({ value: [{ name: '.env', kind: 'file', size: 1, mtimeMs: 0, isLink: false }] }))
+  on('fs.read', () => ({ value: 'SECRET=abc\n' }))
+
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await band.find({ key: 'all-files' })).toBeUndefined()
+  expect(await band.find({ key: 'chip:.env' })).toBeUndefined()
+  expect(await band.find({ key: 'engine' })).toBeDefined()
+  await band.unmount()
 })

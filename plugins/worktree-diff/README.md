@@ -13,7 +13,7 @@ A Claude Code mod: the files that changed in the session's worktree, in one row 
 - **Code**: the file with a breadcrumb (`folder › file › # section`), line numbers, syntax highlighting (Markdown and code) and a mark in the gutter on every line added (green), modified (blue) or deleted (red). It scrolls with the wheel and draws only what is in view, so a file of any size works.
 - **Edit**: an editor like Warp's, inside the pane: line numbers, colors, change marks, a cursor and a status bar (`Ln 12, Col 4 · ✓ saved`). Click the text to type; arrows, Home/End, PageUp/PageDown, Tab; Enter keeps the indentation. With *Autosave* on it saves once you stop typing; `ctrl+s` saves at once; Esc gives the keyboard back to the prompt.
 - **Tabs**: *Preview* and *Markdown* on `.md` files, *Code* on the rest, *Edit*, and *Changes* with the diff in color.
-- **Environment variables**: `.env`, `.env.*` and `.dev.vars` at the root of the repository show too, even when `.gitignore` hides them from git. Their values stay masked until you press *Show values*; then each one can be edited, removed or added one by one.
+- **Environment variables**: `.env`, `.env.*` and `.dev.vars` at the root of the repository show too, as `E` chips after the changed files, even when `.gitignore` hides them from git. They are not counted as changes, and alone they show no row. Their values stay masked until you press *Show values*; then each one can be edited, removed or added one by one.
 - **↗**: opens the file in your external editor (configurable).
 - The pane has a darker background than the terminal (configurable). It works with the keyboard or the mouse.
 
@@ -35,7 +35,7 @@ In `/config`:
 
 ## Limits
 
-- The list and the row cover the session's worktree alone: what `git status` reports from its root, plus the env files at that root.
+- The list and the row cover the session's worktree alone: what `git status` reports from its root (so nothing `.gitignore` hides), plus the env files at that root.
 - Only the terminal draws the editor (a surface module). The desktop and mobile apps show the code, the diff and the variables; there, *Edit* says to use ↗ instead.
 - A file over 80,000 characters is not editable in the pane (↗ opens it outside), and a diff is cut at 90,000 characters.
 - The counts of a new file come from reading it, for the first 50 new files; the rest show without counts.
