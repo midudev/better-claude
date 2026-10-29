@@ -12,7 +12,7 @@ const LIMITS: SessionRateLimit[] = [
 ]
 
 /** Everything beneath the mod: the clock, the store, the session's usage and what the engine draws. */
-function world (on: On, rateLimits: SessionRateLimit[] = LIMITS) {
+function world (on: On, rateLimits: SessionRateLimit[] = LIMITS, cost?: { usd: number }) {
   const clock = mock.clock(on, { now: NOW })
   const store: Record<string, unknown> = {}
   on('store.get', ($, e) => ({ value: store[e.key] }))
@@ -21,7 +21,7 @@ function world (on: On, rateLimits: SessionRateLimit[] = LIMITS) {
     return { value: undefined }
   })
   on('session.start', ($, e) => ({ cwd: e.cwd }))
-  on('session.usage', () => ({ value: { startedAt: NOW, context: { window: 200_000 }, rateLimits } as never }))
+  on('session.usage', () => ({ value: { startedAt: NOW, context: { window: 200_000 }, rateLimits, cost } as never }))
   on('session.measure', ($, e) => ({ changed: e.changed }))
   // The engine's own node, as core answers it; with mode labels, a Box the tests find.
   on('ui.render', ($, e) => {
@@ -277,4 +277,54 @@ test('off the terminal the meter is drawn whole', async ($, on) => {
   await startSession($)
   const ui = await $.ui.mount({ plugin: 'sub-meter', surface: 'desktop', component: 'SessionMode', props: { modes: [] }, viewport: { columns: 30, rows: 30 } })
   expect(await ui.find({ type: 'Text', text: ' ━━━━━━' })).toBeDefined()
+})
+
+test('shows what the session has cost, before the windows', async ($, on) => {
+  world(on, LIMITS, { usd: 0.42 })
+  await startSession($)
+  expect(await texts(await footer($))).toEqual(['$0.42', '  |  ', '5h', ' ━━━━━━', '────', ' 58%', ' ↻ 2h 10m'])
+})
+
+test('a measurement that grew the cost shows it, and does not store it', async ($, on) => {
+  const w = world(on, LIMITS, { usd: 0.42 })
+  await startSession($)
+  await $.session.measure({ context: { window: 200_000 }, rateLimits: LIMITS, cost: { usd: 12.3 }, changed: ['cost'] } as never)
+  expect(await (await footer($)).find({ type: 'Text', text: '$12.30' })).toBeDefined()
+  expect(JSON.stringify(w.store)).not.toContain('12.3')
+})
+
+test('writes the cost by its size', async ($, on) => {
+  world(on, LIMITS, { usd: 0.004 })
+  await startSession($)
+  expect(await (await footer($)).find({ type: 'Text', text: '<$0.01' })).toBeDefined()
+  await $.session.measure({ context: { window: 200_000 }, rateLimits: LIMITS, cost: { usd: 123.4 }, changed: ['cost'] } as never)
+  expect(await (await footer($)).find({ type: 'Text', text: '$123' })).toBeDefined()
+})
+
+test('showCost: false leaves the cost out', { options: { showCost: false } }, async ($, on) => {
+  world(on, LIMITS, { usd: 0.42 })
+  await startSession($)
+  expect(await texts(await footer($))).toEqual(['5h', ' ━━━━━━', '────', ' 58%', ' ↻ 2h 10m'])
+})
+
+test('off a subscription the cost is shown alone', async ($, on) => {
+  world(on, [], { usd: 0.42 })
+  await startSession($)
+  expect(await texts(await footer($, ['focus']))).toEqual(['$0.42', ' · '])
+})
+
+test('with neither limits nor cost the engine draws its own footer', async ($, on) => {
+  world(on, [])
+  await startSession($)
+  expect(await (await footer($, ['focus'])).find({ key: 'engine' })).toBeDefined()
+  expect(await texts(await footer($, ['focus']))).toEqual([])
+})
+
+test('where the row is short the cost goes first, then the rest as before', async ($, on) => {
+  world(on, LIMITS, { usd: 0.42 })
+  await startSession($)
+  expect(await texts(await footer($, [], 66))).toEqual(['$0.42', '  |  ', '5h', ' ━━━━━━', '────', ' 58%', ' ↻ 2h 10m'])
+  expect(await texts(await footer($, [], 65))).toEqual(['5h', ' ━━━━━━', '────', ' 58%', ' ↻ 2h 10m'])
+  expect(await texts(await footer($, [], 55))).toEqual(['5h', ' 58%', ' ↻ 2h 10m'])
+  expect(await texts(await footer($, [], 44))).toEqual(['5h', ' 58%'])
 })
