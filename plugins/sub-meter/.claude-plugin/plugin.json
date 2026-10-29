@@ -1,6 +1,6 @@
 {
   "name": "sub-meter",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "description": "Your subscription usage at the bottom right of Claude Code: the 5-hour and weekly windows, taking turns, side by side or fixed on one of them.",
   "author": {
     "name": "Miguel Ángel Durán (midudev)",
@@ -25,6 +25,12 @@
       "description": "How long the meter shows each window (5-hour, weekly) before it switches to the other. Only used when display is rotate.",
       "default": 8,
       "min": 1
+    },
+    "showCost": {
+      "type": "boolean",
+      "title": "Show the session's cost",
+      "description": "Draw what the session has cost so far, in dollars, before the windows. Claude Code's own estimate (the one /cost shows), so it can differ from what a gateway bills. Off a subscription it is shown alone.",
+      "default": true
     },
     "hideCycleHint": {
       "type": "boolean",

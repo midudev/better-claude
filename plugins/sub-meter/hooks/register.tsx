@@ -6,6 +6,7 @@ import type { Limit } from '../types'
 const limits = atom({ plugin: 'sub-meter', key: 'limits' } as const, [] as Limit[])
 const view = atom({ plugin: 'sub-meter', key: 'view' } as const, 0) // which window the rotating meter shows
 const tick = atom({ plugin: 'sub-meter', key: 'tick' } as const, 0) // redraws the countdown
+const cost = atom({ plugin: 'sub-meter', key: 'cost' } as const, null as number | null) // what this session has cost, in dollars
 
 const WINDOWS = ['five_hour', 'seven_day']
 const LABELS: Record<string, string> = { five_hour: '5h', seven_day: 'week' }
@@ -80,6 +81,13 @@ function roomOf (e: { surface: string; viewport?: RenderViewport }) {
 
 const colorFor = (percent: number) => (percent >= 90 ? 'error' : percent >= 75 ? 'warning' : 'claude')
 
+/** "$0.42", "$12.30", "$123": what the session has cost; "<$0.01" while it is under a cent. */
+function money (usd: number) {
+  if (usd <= 0) return '$0.00'
+  if (usd < 0.01) return '<$0.01'
+  return usd < 100 ? `$${usd.toFixed(2)}` : `$${Math.round(usd)}`
+}
+
 /** "42m", "3h 5m", "2d 4h": how long until the window resets. */
 function until (ms: number) {
   const minutes = Math.max(1, Math.round(ms / 60000))
@@ -127,6 +135,7 @@ export const register: Register = (on, options) => {
   lastTidied = ''
   const hideCycleHint = options.hideCycleHint !== false
   const hideInterruptHint = options.hideInterruptHint !== false
+  const showCost = options.showCost !== false
   const rotateSeconds = Number(options.rotateSeconds)
   const rotateMs = (rotateSeconds > 0 ? rotateSeconds : ROTATE_SECONDS) * 1000
   const display = DISPLAYS.includes(String(options.display)) ? String(options.display) : 'rotate'
@@ -159,6 +168,7 @@ export const register: Register = (on, options) => {
     }
     seenAt = Number(storedAt) || 0
 
+    await update($, cost, () => usage.cost?.usd ?? null)
     await remember($, windowsOf(usage.rateLimits))
 
     if (e.isInteractive) {
@@ -185,6 +195,8 @@ export const register: Register = (on, options) => {
   })
 
   on('session.measure', async ($, e, next) => {
+    // The cost is this session's own: it is not shared through the store like the limits.
+    if (e.cost !== undefined && e.changed.includes('cost')) await update($, cost, () => e.cost?.usd)
     await remember($, windowsOf(e.rateLimits))
     return next(e)
   })
@@ -193,11 +205,11 @@ export const register: Register = (on, options) => {
   // another plugin's switch), so a plugin that draws itself last stays last whichever wraps the other.
   // Where the row is short the meter gives up its bar, then the time until the reset, then itself.
   on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
-    const all = await read($, limits)
-    if (all.length === 0) return next(e)
+    const [all, spent] = await Promise.all([read($, limits), showCost ? read($, cost) : null])
+    if (all.length === 0 && spent === null) return next(e)
     const index = display === 'rotate' && all.length >= 2 ? await read($, view) : 0
     const shown = visible(all, display, index)
-    if (shown.length === 0) return next(e)
+    if (shown.length === 0 && spent === null) return next(e)
     // Subscribes this drawing to the countdown tick alongside reading the clock and beneath node
     const [, now, beneath] = await Promise.all([read($, tick), $.clock.now(), next(e)])
     const hasBeneath = e.props.modes.length > 0 || !isBlank(beneath)
@@ -216,23 +228,29 @@ export const register: Register = (on, options) => {
     const hasPlugin = holdsPlugin(beneath)
     const room = roomOf(e) - (hasBeneath ? below + SEPARATOR.length : 0) - (hasPlugin ? 0 : AROUND)
     const given = hasPlugin ? Math.max(0, BENEATH_FLOOR - below) : 0
-    const short = windows.reduce((sum, w) => sum + w.short, (windows.length - 1) * BETWEEN.length)
+    const total = spent === null ? '' : money(spent)
+    const short = windows.reduce((sum, w) => sum + w.short, Math.max(0, windows.length - 1) * BETWEEN.length)
+    const totalWidth = total === '' ? 0 : widthOf(total) + (windows.length > 0 ? BETWEEN.length : 0)
     const bars = windows.length * (1 + CELLS)
     const resets = windows.reduce((sum, w) => sum + widthOf(w.reset), 0)
+    // The cost is the first to go where the row is short, then the bar, the reset time, the meter.
     const fit = [
-      { hasBar: true, hasReset: true, width: short + bars + resets },
-      { hasBar: false, hasReset: true, width: short + resets },
-      { hasBar: false, hasReset: false, width: short }
-    ].find(({ hasReset, width }) => width <= (hasReset ? room - given : room))
+      { hasCost: true, hasBar: true, hasReset: true, width: totalWidth + short + bars + resets },
+      { hasCost: false, hasBar: true, hasReset: true, width: short + bars + resets },
+      { hasCost: false, hasBar: false, hasReset: true, width: short + resets },
+      { hasCost: false, hasBar: false, hasReset: false, width: short }
+    ].filter(({ hasCost }) => (hasCost ? total !== '' : windows.length > 0))
+      .find(({ hasReset, width }) => width <= (hasReset && windows.length > 0 ? room - given : room))
     if (!fit) return beneath
 
     const { Box, Text } = $.ui.resolve(e)
 
     return (
       <Box flexDirection="row">
+        {fit.hasCost ? <Text>{total}</Text> : null}
         {windows.map((w, i) => (
           <Box flexDirection="row" key={w.kind}>
-            {i > 0 ? <Text dimColor>{BETWEEN}</Text> : null}
+            {i > 0 || fit.hasCost ? <Text dimColor>{BETWEEN}</Text> : null}
             <Text dimColor>{w.label}</Text>
             {fit.hasBar ? <Text color={colorFor(w.percent)}>{' ' + '━'.repeat(w.filled)}</Text> : null}
             {fit.hasBar ? <Text dimColor>{'─'.repeat(CELLS - w.filled)}</Text> : null}
