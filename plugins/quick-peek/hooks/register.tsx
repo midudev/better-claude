@@ -5,7 +5,7 @@ import type { Excerpt } from './code'
 import { blocks, inline, items, markerOf, widthOf, wrap } from './markdown'
 import type { Item, Row, Run } from './markdown'
 import { lineOf, pathOfSpan, pathsIn, resolve } from './paths'
-import { MACOS, WINDOWS, WINDOWS_TYPES, powershell } from './window'
+import { MACOS, WINDOWS, WINDOWS_OPEN, WINDOWS_REVEAL, WINDOWS_TYPES, powershell } from './window'
 
 type Engine = EngineInterface
 type Ui = Elements['terminal']
@@ -335,8 +335,8 @@ async function reveal ($: Engine, path: string, isOpening: boolean) {
     return
   }
   if (system === 'windows') {
-    const windows = path.replaceAll('/', '\\')
-    await run(isOpening ? ['explorer', windows] : ['explorer', `/select,${windows}`])
+    const env = { QUICK_PEEK_FILE: path.replaceAll('/', '\\') }
+    await $.process.run(powershell(isOpening ? WINDOWS_OPEN : WINDOWS_REVEAL), { env }).catch(() => undefined)
     return
   }
   if (isOpening) {

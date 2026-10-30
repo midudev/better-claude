@@ -724,6 +724,14 @@ try {
 }
 `
 
+/**
+ * Windows: Explorer with QUICK_PEEK_FILE selected, and the file or folder opened with its app.
+ * Started hidden, as the engine starts a program, Explorer opens its window hidden too: the shell
+ * is asked through PowerShell, which opens it shown.
+ */
+export const WINDOWS_REVEAL = String.raw`Start-Process explorer -ArgumentList ('/select,"' + $env:QUICK_PEEK_FILE + '"')`
+export const WINDOWS_OPEN = String.raw`Invoke-Item -LiteralPath $env:QUICK_PEEK_FILE`
+
 const encodedCache = new Map<string, string>()
 
 /** A PowerShell script as `-EncodedCommand` takes it: UTF-16LE, base64. */

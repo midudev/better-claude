@@ -26,7 +26,7 @@ A path a row cannot hold is drawn in parts, cut after a `/`, and each part is th
 | --- | --- | --- |
 | macOS | Finder, the file selected | A window by the pointer, with the Quick Look thumbnail |
 | Linux | The file manager, the file selected (`org.freedesktop.FileManager1`), else its folder with `xdg-open` | A one-line card over the path: name, size, age; a file of code, its first 8 lines under it |
-| Windows | Explorer, the file selected (`explorer /select,`) | A window by the pointer, with the shell's thumbnail (a PDF's first page, rendered by Windows itself), run by PowerShell: nothing to install |
+| Windows | Explorer, the file selected (`explorer /select,`, started through PowerShell: started hidden, as Claude Code starts a program, Explorer would open its window hidden) | A window by the pointer, with the shell's thumbnail (a PDF's first page, rendered by Windows itself), run by PowerShell: nothing to install |
 | WSL | Windows' Explorer, the path turned into its Windows form by `wslpath -w` | The card |
 
 Turn the window off with the **Preview in a window** option (`/config`) to get the card on macOS and Windows too. Over SSH the window would open on the other machine, so there the card shows. On Windows the date under the name is in your regional format, not an age; where PowerShell may not compile code (Constrained Language Mode, AppLocker), the card shows.

@@ -6,7 +6,7 @@ import type { On } from 'claude-code'
 import { excerptOf, languageOf, tokenize } from './code'
 import { blocks, inline, items, wrap } from './markdown'
 import { lineOf, pathOfSpan, pathsIn, resolve } from './paths'
-import { WINDOWS, WINDOWS_TYPES, encodedCommand } from './window'
+import { WINDOWS, WINDOWS_OPEN, WINDOWS_REVEAL, WINDOWS_TYPES, encodedCommand, powershell } from './window'
 
 const VIDEO = '/Users/ana/videos/borrador.mp4'
 const FOLDER = '/Users/ana/videos'
@@ -26,11 +26,13 @@ function world (on: On, { system = 'Darwin', env = {}, cwd = '/project/app', pro
   mock.env(on, { HOME: '/Users/ana', ...env })
   const there: Record<string, 'file' | 'dir'> = { [VIDEO]: 'file', [FOLDER]: 'dir', [README]: 'file', [SOURCE]: 'file' }
   const runs: string[][] = []
+  const envs: (Record<string, string> | undefined)[] = []
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: cwd }))
   on('session.root', () => ({ value: '/project/app' }))
   on('process.run', ($, e) => {
     runs.push([...e.argv])
+    envs.push(e.init?.env && { ...e.init.env })
     const stdout = e.argv[0] === 'uname' ? `${system}\n` : e.argv[0] === 'wslpath' ? 'C:\\Users\\ana\\videos\\borrador.mp4\n' : ''
     return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
@@ -70,7 +72,9 @@ function world (on: On, { system = 'Darwin', env = {}, cwd = '/project/app', pro
     logs.push(e.text)
     return { value: undefined }
   })
-  return { clock, runs, windows, logs }
+  // A program run, with what it was told in its environment.
+  const ran = (argv: string[]) => envs[runs.findIndex(run => run.length === argv.length && run.every((arg, i) => arg === argv[i]))]
+  return { clock, runs, ran, windows, logs }
 }
 
 const startSession = ($: Engine) => $.session.start({ cwd: '/project/app', surface: 'terminal', isInteractive: true })
@@ -366,7 +370,7 @@ test('on Windows a window that cannot show (no compiling allowed) gives the term
   expect(await again.find({ key: 'card:0:0' })).toBeDefined()
 })
 
-test('on Windows a click selects the path in Explorer; an alt-click opens it', async ($, on) => {
+test('on Windows a click selects the path in Explorer, an alt-click opens it: through PowerShell, so the window shows', async ($, on) => {
   const w = world(on, WINDOWS_HOST)
   await startSession($)
   const ui = await reply($, 'Mira `src/app.ts`')
@@ -374,9 +378,11 @@ test('on Windows a click selects the path in Explorer; an alt-click opens it', a
   await ui.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'path:0:0' })
   await ui.pointer({ type: 'up', x: 2, y: 0, button: 'left', in: 'path:0:0' })
   await w.clock.settle()
-  expect(w.runs).toContainEqual(['explorer', '/select,C:\\project\\app\\src\\app.ts'])
+  expect(w.ran(powershell(WINDOWS_REVEAL))).toEqual({ QUICK_PEEK_FILE: 'C:\\project\\app\\src\\app.ts' })
   await ui.pointer({ type: 'down', x: 2, y: 0, button: 'left', alt: true, in: 'path:0:0' })
   await ui.pointer({ type: 'up', x: 2, y: 0, button: 'left', alt: true, in: 'path:0:0' })
   await w.clock.settle()
-  expect(w.runs).toContainEqual(['explorer', 'C:\\project\\app\\src\\app.ts'])
+  expect(w.ran(powershell(WINDOWS_OPEN))).toEqual({ QUICK_PEEK_FILE: 'C:\\project\\app\\src\\app.ts' })
+  // Started straight, Explorer would open its window hidden.
+  expect(w.runs.some(argv => argv[0] === 'explorer')).toBe(false)
 })
