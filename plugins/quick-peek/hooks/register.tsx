@@ -40,8 +40,12 @@ const PLANS = 300
 const WINDOW_SIZE = 360
 const WINDOW_LIFE = 60
 const WINDOW_HINT = { macos: 'click: show in Finder · ⌥ click: open', windows: 'click: show in Explorer · Alt click: open' }
-// How long a window stays once the pointer left its path, in case it comes back.
+// How long the pointer rests on a path before its window opens: crossing a list of paths opens
+// none. How long a window stays once the pointer left its path, in case it comes back. How many
+// programs in a row may fail to start before the terminal shows the cards.
+const OPEN_MS = 150
 const LEAVE_MS = 200
+const FAILURES = 3
 // The largest file of code or text read for its lines; the lines the window shows, the lines and
 // columns a card shows.
 const CODE_BYTES = 1024 * 1024
@@ -56,10 +60,11 @@ let platform: Promise<Platform> | undefined
 let wsl: Promise<boolean> | undefined
 // The system whose window a hover opens by the pointer (macOS, Windows); else none, and each path
 // carries a card the terminal reveals over it. The path the pointer is on, and the part it is on;
-// the window open.
+// the window open; how many programs in a row ended without showing one.
 let windowing: 'macos' | 'windows' | undefined
 let hovered: { path: string; line: number | undefined; target: string } | undefined
 let window: { path: string; line: number | undefined; isOpen: boolean } | undefined
+let failures = 0
 
 /** The system the session runs on, asked once. */
 function platformOf ($: Engine) {
@@ -350,8 +355,9 @@ async function reveal ($: Engine, path: string, isOpening: boolean) {
 /**
  * Shows `path` in a window by the pointer till `closeWindow`; a file of code or text, its lines
  * around `line`. The program says `.` ten times a second, so the loop wakes to see it was closed,
- * and leaving the loop ends the program. One that ends without having shown a window, on a path
- * that is there, says the system shows none: from then on the terminal shows the cards.
+ * and leaving the loop ends the program. One that says it shows no window (`error: …`), on a path
+ * that is there, or `FAILURES` in a row that end without showing one, say the system shows none:
+ * from then on the terminal shows the cards.
  */
 async function openWindow ($: Engine, path: string, line: number | undefined) {
   closeWindow()
@@ -359,6 +365,12 @@ async function openWindow ($: Engine, path: string, line: number | undefined) {
   if (!system) return
   const opening = { path, line, isOpen: true }
   window = opening
+  // Only once the pointer rests on the path: one program, not one for each path it crosses.
+  await $.clock.sleep(OPEN_MS)
+  if (!opening.isOpen || hovered?.path !== path || hovered.line !== line) {
+    if (window === opening) closeWindow()
+    return
+  }
   const env: Record<string, string> = { QUICK_PEEK_FILE: path, QUICK_PEEK_SIZE: String(WINDOW_SIZE), QUICK_PEEK_LIFE: String(WINDOW_LIFE), QUICK_PEEK_HINT: WINDOW_HINT[system] }
   const stat = await statOf($, path)
   const code = stat && (await excerptAt($, path, stat, line, WINDOW_LINES))
@@ -382,8 +394,16 @@ async function openWindow ($: Engine, path: string, line: number | undefined) {
     said += error instanceof Error ? error.message : String(error)
   }
   if (window === opening) window = undefined
+  if (isShown) failures = 0
   if (isShown || !opening.isOpen || /^error: not there/m.test(said)) return
-  $.ui.log(`quick-peek: no window (${said.replace(/\.\n/g, '').trim().slice(0, 300) || 'the program could not start'}); the terminal shows the cards`, { to: 'debug' })
+  // PowerShell may write in UTF-16: its NULs dropped, what it said reads whole.
+  const reason = said.replaceAll('\u0000', '').replace(/\.\r?\n/g, '').trim().slice(0, 300) || 'the program could not start'
+  // A program that failed to start (many PowerShells at once) may start the next time.
+  if (!/^error/m.test(said) && ++failures < FAILURES) {
+    $.ui.log(`quick-peek: no window (${reason}); the next hover tries again`, { to: 'debug' })
+    return
+  }
+  $.ui.log(`quick-peek: no window (${reason}); the terminal shows the cards`, { to: 'debug' })
   windowing = undefined
   plans.clear()
 }
@@ -426,6 +446,7 @@ export const register: Register = (on, options) => {
     // A window opens on the desktop the session runs on: not over SSH, where that is another machine's.
     const hasWindow = options.window !== false && e.isInteractive && sshConnection === undefined && sshTty === undefined
     windowing = hasWindow && (system === 'macos' || system === 'windows') ? system : undefined
+    failures = 0
     plans.clear()
     stats.clear()
     excerpts.clear()
