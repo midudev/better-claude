@@ -17,8 +17,6 @@ type Platform = 'macos' | 'linux' | 'windows' | 'other'
  * with no window, the lines of code or text its card shows.
  */
 type Target = { path: string; stat: FsStat; line?: number; code?: Excerpt }
-/** The preview's window: its path and line, and whether it is open. */
-type Preview = { path: string; line: number | undefined; isOpen: boolean }
 /** An item of a list the mod draws: its marker, its runs, the items under it, blank lines before it. */
 type DrawnItem = { marker: string; runs: Run[]; children: DrawnItem[]; gap: number }
 /** A part of a reply: drawn by the engine's Markdown, or by the mod, its paths links. */
@@ -61,7 +59,7 @@ let wsl: Promise<boolean> | undefined
 // the window open.
 let windowing: 'macos' | 'windows' | undefined
 let hovered: { path: string; line: number | undefined; target: string } | undefined
-let window: Preview | undefined
+let window: { path: string; line: number | undefined; isOpen: boolean } | undefined
 
 /** The system the session runs on, asked once. */
 function platformOf ($: Engine) {
@@ -359,7 +357,7 @@ async function openWindow ($: Engine, path: string, line: number | undefined) {
   closeWindow()
   const system = windowing
   if (!system) return
-  const opening: Preview = { path, line, isOpen: true }
+  const opening = { path, line, isOpen: true }
   window = opening
   const env: Record<string, string> = { QUICK_PEEK_FILE: path, QUICK_PEEK_SIZE: String(WINDOW_SIZE), QUICK_PEEK_LIFE: String(WINDOW_LIFE), QUICK_PEEK_HINT: WINDOW_HINT[system] }
   const stat = await statOf($, path)

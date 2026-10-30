@@ -295,9 +295,6 @@ public class QuickPeekWindow : Form {
   int mark;
   int gutter;
   Point pointer;
-  IntPtr front;
-  DateTime end;
-  Timer beat;
 
   static Color Hex (string hex) { return Color.FromArgb(255, Color.FromArgb(Convert.ToInt32(hex, 16))); }
   static int S (double pixels) { return (int)Math.Round(pixels * scale); }
@@ -334,7 +331,9 @@ public class QuickPeekWindow : Form {
     pointer = Cursor.Position;
     Rectangle area = Screen.FromPoint(pointer).WorkingArea;
     int pad = S(12), gap = S(18), inset = S(8);
-    mono = new Font(FontFamilyNamed("Cascadia Mono", "Consolas"), 12 * scale, GraphicsUnit.Pixel);
+    // Cascadia Mono where it is installed (a font missing is another's, named so), else Consolas.
+    mono = new Font("Cascadia Mono", 12 * scale, GraphicsUnit.Pixel);
+    if (mono.Name != "Cascadia Mono") mono = new Font("Consolas", 12 * scale, GraphicsUnit.Pixel);
     Font name = new Font("Segoe UI Semibold", 14 * scale, GraphicsUnit.Pixel);
     Font small = new Font("Segoe UI", 12 * scale, GraphicsUnit.Pixel);
     Font smaller = new Font("Segoe UI", 11 * scale, GraphicsUnit.Pixel);
@@ -496,11 +495,11 @@ public class QuickPeekWindow : Form {
     Say("shown");
     // A pointer that leaves the terminal says nothing to it: the window also ends when another
     // window comes to the front, or the pointer goes rows away from the path.
-    front = GetForegroundWindow();
+    IntPtr front = GetForegroundWindow();
     int life;
     if (!int.TryParse(Environment.GetEnvironmentVariable("QUICK_PEEK_LIFE"), out life)) life = 60;
-    end = DateTime.Now.AddSeconds(life);
-    beat = new Timer();
+    DateTime end = DateTime.Now.AddSeconds(life);
+    Timer beat = new Timer();
     beat.Interval = 100;
     beat.Tick += delegate {
       if (DateTime.Now > end || Math.Abs(Cursor.Position.Y - pointer.Y) > S(120) || GetForegroundWindow() != front || !Say(".")) Close();
@@ -553,11 +552,6 @@ public class QuickPeekWindow : Form {
     path.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
     path.CloseFigure();
     return path;
-  }
-
-  static string FontFamilyNamed (params string[] names) {
-    foreach (string wanted in names) foreach (FontFamily family in FontFamily.Families) if (family.Name == wanted) return wanted;
-    return FontFamily.GenericMonospace.Name;
   }
 
   // Says a line to the one reading; false once nobody reads.
