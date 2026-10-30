@@ -452,8 +452,9 @@ public class QuickPeekWindow : Form {
     Bounds = new Rectangle(left, over, outer.Width, outer.Height);
     BackColor = Backdrop;
     DoubleBuffered = true;
-    // Layered, so the pointer passes through it to the terminal.
-    Opacity = 0.98;
+    // Layered, so the pointer passes through it to the terminal; unseen till it is painted, so
+    // the screen never shows it blank.
+    Opacity = 0;
   }
 
   void AddRow (string text, Font font, Color color, TextFormatFlags flags, int before, int width, int most) {
@@ -490,6 +491,8 @@ public class QuickPeekWindow : Form {
 
   protected override void OnShown (EventArgs e) {
     base.OnShown(e);
+    Update();
+    Opacity = 0.98;
     Say("shown");
     // A pointer that leaves the terminal says nothing to it: the window also ends when another
     // window comes to the front, or the pointer goes rows away from the path.
