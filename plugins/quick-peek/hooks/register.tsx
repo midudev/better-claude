@@ -39,7 +39,7 @@ const PLANS = 300
 // line under it that says what a click does, by system.
 const WINDOW_SIZE = 360
 const WINDOW_LIFE = 60
-const WINDOW_HINT = { macos: 'click: show in Finder · ⌥ click: open', windows: 'click: show in Explorer' }
+const WINDOW_HINT = { macos: 'click: show in Finder · ⌥ click: open', windows: 'click: show in Explorer · Alt click: open' }
 // The largest file of code or text read for its lines; the lines the window shows, the lines and
 // columns a card shows.
 const CODE_BYTES = 1024 * 1024
