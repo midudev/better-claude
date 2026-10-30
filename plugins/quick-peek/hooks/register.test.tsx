@@ -6,6 +6,7 @@ import type { On } from 'claude-code'
 import { excerptOf, languageOf, tokenize } from './code'
 import { blocks, inline, items, wrap } from './markdown'
 import { lineOf, pathOfSpan, pathsIn, resolve } from './paths'
+import { WINDOWS, WINDOWS_TYPES, encodedCommand } from './window'
 
 const VIDEO = '/Users/ana/videos/borrador.mp4'
 const FOLDER = '/Users/ana/videos'
@@ -20,7 +21,7 @@ const SCREEN = { columns: 60, rows: 40, isFullscreen: true }
  * Everything beneath the mod: the session, the files that are there, the programs it runs, the
  * window's program, and what the engine draws.
  */
-function world (on: On, { system = 'Darwin', env = {}, cwd = '/project/app' }: { system?: string; env?: Record<string, string>; cwd?: string } = {}) {
+function world (on: On, { system = 'Darwin', env = {}, cwd = '/project/app', program = 'shows' }: { system?: string; env?: Record<string, string>; cwd?: string; program?: 'shows' | 'fails' } = {}) {
   const clock = mock.clock(on, { now: 0 })
   mock.env(on, { HOME: '/Users/ana', ...env })
   const there: Record<string, 'file' | 'dir'> = { [VIDEO]: 'file', [FOLDER]: 'dir', [README]: 'file', [SOURCE]: 'file' }
@@ -40,12 +41,17 @@ function world (on: On, { system = 'Darwin', env = {}, cwd = '/project/app' }: {
     return { value: { kind, size: path === SOURCE ? CODE.length : 12 * 1024 * 1024, mtimeMs: 0, isLink: false } }
   })
   on('fs.read', ($, e) => (posix(e.path) === SOURCE ? { value: CODE } : { deny: `ENOENT: ${e.path}` }))
-  // The window's program: it says `shown`, then `.` every tenth of a second till it is ended.
-  const windows: { env: Record<string, string>; isEnded: boolean }[] = []
+  // The window's program: it says `shown`, then `.` every tenth of a second till it is ended; or,
+  // where the system lets it show none, an error, and it ends.
+  const windows: { argv: string[]; env: Record<string, string>; isEnded: boolean }[] = []
   on('process.spawn', async function * ($, e) {
-    const opened = { env: { ...e.env }, isEnded: false }
+    const opened = { argv: [...e.argv], env: { ...e.env }, isEnded: false }
     windows.push(opened)
     try {
+      if (program === 'fails') {
+        yield { stream: 'stdout' as const, text: 'error: Cannot add type. Compilation is not allowed here.\n' }
+        return { value: { code: 1, signal: null } }
+      }
       yield { stream: 'stdout' as const, text: 'shown\n' }
       for (;;) {
         await clock.sleep(100)
@@ -59,7 +65,12 @@ function world (on: On, { system = 'Darwin', env = {}, cwd = '/project/app' }: {
     const { Box } = $.ui.resolve(e)
     return <Box key="engine" />
   })
-  return { clock, runs, windows }
+  const logs: string[] = []
+  on('ui.log', ($, e) => {
+    logs.push(e.text)
+    return { value: undefined }
+  })
+  return { clock, runs, windows, logs }
 }
 
 const startSession = ($: Engine) => $.session.start({ cwd: '/project/app', surface: 'terminal', isInteractive: true })
@@ -266,4 +277,87 @@ test('under WSL a click selects the path in Explorer', async ($, on) => {
   await ui.pointer({ type: 'up', x: 2, y: 0, button: 'left', in: 'path:0:0' })
   await w.clock.settle()
   expect(w.runs).toContainEqual(['explorer.exe', '/select,C:\\Users\\ana\\videos\\borrador.mp4'])
+})
+
+// A Windows session: its folders are `C:\…`, and no `uname` answers.
+const WINDOWS_HOST = { system: '', cwd: 'C:\\project\\app', env: { OS: 'Windows_NT', HOME: 'C:\\Users\\ana' } }
+// The longest command line Windows starts, and the longest variable it holds, in characters.
+const WINDOWS_LIMIT = 32_767
+
+test('on Windows the pointer on a path opens PowerShell\'s window, the C# it compiles told in the environment', async ($, on) => {
+  const w = world(on, WINDOWS_HOST)
+  await startSession($)
+  const ui = await reply($, 'El arranque está en `src/app.ts:5`.')
+  await ui.pointer({ type: 'enter', x: 0, y: 0, in: 'path:0:0' })
+  await w.clock.advance(100)
+  expect(w.windows).toHaveLength(1)
+  expect(w.windows[0]!.argv).toEqual(['powershell', '-NoProfile', '-NonInteractive', '-STA', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encodedCommand(WINDOWS)])
+  expect(w.windows[0]!.env).toMatchObject({ QUICK_PEEK_FILE: 'C:/project/app/src/app.ts', QUICK_PEEK_TYPES: WINDOWS_TYPES, QUICK_PEEK_HINT: 'click: show in Explorer' })
+  expect(JSON.parse(w.windows[0]!.env.QUICK_PEEK_CODE!)).toMatchObject({ language: 'TypeScript', first: 1, mark: 5 })
+  await ui.pointer({ type: 'leave', x: 3, y: 0, in: 'path:0:0' })
+  await w.clock.advance(300)
+  expect(w.windows[0]!.isEnded).toBe(true)
+})
+
+test('on Windows the window\'s command line, and the C# in QUICK_PEEK_TYPES, fit what Windows holds', async ($, on) => {
+  const w = world(on, WINDOWS_HOST)
+  await startSession($)
+  const ui = await reply($, 'El arranque está en `src/app.ts:5`.')
+  await ui.pointer({ type: 'enter', x: 0, y: 0, in: 'path:0:0' })
+  await w.clock.advance(100)
+  const { argv, env } = w.windows[0]!
+  // Each argument, quoted, and a space between: the line CreateProcess is given.
+  expect(argv.reduce((length, arg) => length + arg.length + 3, 0)).toBeLessThan(WINDOWS_LIMIT)
+  // A variable is held as NAME=value.
+  expect(`QUICK_PEEK_TYPES=${env.QUICK_PEEK_TYPES}`.length).toBeLessThan(WINDOWS_LIMIT)
+  for (const [name, value] of Object.entries(env)) expect(`${name}=${value}`.length).toBeLessThan(WINDOWS_LIMIT)
+})
+
+test('on Windows, with "Preview in a window" off, the terminal shows the cards', cards, async ($, on) => {
+  const w = world(on, WINDOWS_HOST)
+  await startSession($)
+  const ui = await reply($, `Listo: ${VIDEO}`)
+  expect(await ui.find({ key: 'card:0:0' })).toBeDefined()
+  await ui.pointer({ type: 'enter', x: 0, y: 0, in: 'path:0:0' })
+  await w.clock.advance(100)
+  expect(w.windows).toHaveLength(0)
+})
+
+test('over SSH the window would open on the other machine: the terminal shows the cards', async ($, on) => {
+  const w = world(on, { ...WINDOWS_HOST, env: { ...WINDOWS_HOST.env, SSH_CONNECTION: '10.0.0.2 52000 10.0.0.1 22' } })
+  await startSession($)
+  const ui = await reply($, `Listo: ${VIDEO}`)
+  expect(await ui.find({ key: 'card:0:0' })).toBeDefined()
+  await ui.pointer({ type: 'enter', x: 0, y: 0, in: 'path:0:0' })
+  await w.clock.advance(100)
+  expect(w.windows).toHaveLength(0)
+})
+
+test('on Windows a window that cannot show (no compiling allowed) gives the terminal the cards', async ($, on) => {
+  const w = world(on, { ...WINDOWS_HOST, program: 'fails' })
+  await startSession($)
+  const first = await reply($, `Listo: ${VIDEO}`)
+  expect(await first.find({ key: 'card:0:0' })).toBeUndefined()
+  await first.pointer({ type: 'enter', x: 0, y: 0, in: 'path:0:0' })
+  await w.clock.advance(100)
+  expect(w.windows[0]!.isEnded).toBe(true)
+  expect(w.logs).toContainEqual(expect.stringMatching(/no window \(error: Cannot add type/))
+  await first.unmount()
+  const again = await reply($, `Listo: ${VIDEO}`)
+  expect(await again.find({ key: 'card:0:0' })).toBeDefined()
+})
+
+test('on Windows a click selects the path in Explorer; an alt-click opens it', async ($, on) => {
+  const w = world(on, WINDOWS_HOST)
+  await startSession($)
+  const ui = await reply($, 'Mira `src/app.ts`')
+  await ui.resize({ columns: 10, rows: 1, in: 'path:0:0' })
+  await ui.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'path:0:0' })
+  await ui.pointer({ type: 'up', x: 2, y: 0, button: 'left', in: 'path:0:0' })
+  await w.clock.settle()
+  expect(w.runs).toContainEqual(['explorer', '/select,C:\\project\\app\\src\\app.ts'])
+  await ui.pointer({ type: 'down', x: 2, y: 0, button: 'left', alt: true, in: 'path:0:0' })
+  await ui.pointer({ type: 'up', x: 2, y: 0, button: 'left', alt: true, in: 'path:0:0' })
+  await w.clock.settle()
+  expect(w.runs).toContainEqual(['explorer', 'C:\\project\\app\\src\\app.ts'])
 })

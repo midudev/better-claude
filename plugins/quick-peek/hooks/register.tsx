@@ -5,7 +5,7 @@ import type { Excerpt } from './code'
 import { blocks, inline, items, markerOf, widthOf, wrap } from './markdown'
 import type { Item, Row, Run } from './markdown'
 import { lineOf, pathOfSpan, pathsIn, resolve } from './paths'
-import { MACOS } from './window'
+import { MACOS, WINDOWS, WINDOWS_TYPES, powershell } from './window'
 
 type Engine = EngineInterface
 type Ui = Elements['terminal']
@@ -35,9 +35,11 @@ const FOUND_MS = 30_000
 const MISSING_MS = 3_000
 const PLAN_MS = 10_000
 const PLANS = 300
-// The longest side of the preview's picture, in points, and the most seconds the window stays.
+// The longest side of the preview's picture, in points, and the most seconds the window stays; the
+// line under it that says what a click does, by system.
 const WINDOW_SIZE = 360
 const WINDOW_LIFE = 60
+const WINDOW_HINT = { macos: 'click: show in Finder · ⌥ click: open', windows: 'click: show in Explorer' }
 // The largest file of code or text read for its lines; the lines the window shows, the lines and
 // columns a card shows.
 const CODE_BYTES = 1024 * 1024
@@ -50,9 +52,10 @@ const plans = new Map<string, { plan: Plan | null; at: number }>()
 const excerpts = new Map<string, Excerpt | null>()
 let platform: Promise<Platform> | undefined
 let wsl: Promise<boolean> | undefined
-// Whether a hover opens a window by the pointer (macOS); else each path carries a card the
-// terminal reveals over it. The path the pointer is on, and the part it is on; the window open.
-let windowing = false
+// The system whose window a hover opens by the pointer (macOS, Windows); else none, and each path
+// carries a card the terminal reveals over it. The path the pointer is on, and the part it is on;
+// the window open.
+let windowing: 'macos' | 'windows' | undefined
 let hovered: { path: string; line: number | undefined; target: string } | undefined
 let window: { path: string; line: number | undefined; isOpen: boolean } | undefined
 
@@ -350,9 +353,11 @@ async function reveal ($: Engine, path: string, isOpening: boolean) {
  */
 async function openWindow ($: Engine, path: string, line: number | undefined) {
   closeWindow()
+  const system = windowing
+  if (!system) return
   const opening = { path, line, isOpen: true }
   window = opening
-  const env: Record<string, string> = { QUICK_PEEK_FILE: path, QUICK_PEEK_SIZE: String(WINDOW_SIZE), QUICK_PEEK_LIFE: String(WINDOW_LIFE), QUICK_PEEK_HINT: 'click: show in Finder · ⌥ click: open' }
+  const env: Record<string, string> = { QUICK_PEEK_FILE: path, QUICK_PEEK_SIZE: String(WINDOW_SIZE), QUICK_PEEK_LIFE: String(WINDOW_LIFE), QUICK_PEEK_HINT: WINDOW_HINT[system] }
   const stat = await statOf($, path)
   const code = stat && (await excerptAt($, path, stat, line, WINDOW_LINES))
   if (!opening.isOpen) return
@@ -360,10 +365,13 @@ async function openWindow ($: Engine, path: string, line: number | undefined) {
     const { source, ...shown } = code
     env.QUICK_PEEK_CODE = JSON.stringify(shown)
   }
+  // Windows' window is C#, too long for a command line: PowerShell is told it in the environment.
+  const argv = system === 'macos' ? ['osascript', '-l', 'JavaScript', '-e', MACOS] : powershell(WINDOWS)
+  if (system === 'windows') env.QUICK_PEEK_TYPES = WINDOWS_TYPES
   let isShown = false
   let said = ''
   try {
-    for await (const { text } of $.process.spawn({ argv: ['osascript', '-l', 'JavaScript', '-e', MACOS], env })) {
+    for await (const { text } of $.process.spawn({ argv, env })) {
       if (said.length < 2000) said += text
       if (/^shown$/m.test(text)) isShown = true
       if (!opening.isOpen) break
@@ -374,7 +382,7 @@ async function openWindow ($: Engine, path: string, line: number | undefined) {
   if (window === opening) window = undefined
   if (isShown || !opening.isOpen || /^error: not there/m.test(said)) return
   $.ui.log(`quick-peek: no window (${said.replace(/\.\n/g, '').trim().slice(0, 300) || 'the program could not start'}); the terminal shows the cards`, { to: 'debug' })
-  windowing = false
+  windowing = undefined
   plans.clear()
 }
 
@@ -406,7 +414,8 @@ export const register: Register = (on, options) => {
     const result = await next(e)
     const [system, sshConnection, sshTty] = await Promise.all([platformOf($), $.env.get('SSH_CONNECTION'), $.env.get('SSH_TTY')])
     // A window opens on the desktop the session runs on: not over SSH, where that is another machine's.
-    windowing = options.window !== false && e.isInteractive && system === 'macos' && sshConnection === undefined && sshTty === undefined
+    const hasWindow = options.window !== false && e.isInteractive && sshConnection === undefined && sshTty === undefined
+    windowing = hasWindow && (system === 'macos' || system === 'windows') ? system : undefined
     plans.clear()
     stats.clear()
     excerpts.clear()
