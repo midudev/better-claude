@@ -6,12 +6,13 @@ import type { On } from 'claude-code'
 import { excerptOf, languageOf, tokenize } from './code'
 import { blocks, inline, items, wrap } from './markdown'
 import { lineOf, pathOfSpan, pathsIn, resolve } from './paths'
-import { WINDOWS, WINDOWS_OPEN, WINDOWS_REVEAL, WINDOWS_TYPES, encodedCommand, powershell } from './window'
+import { WINDOWS, WINDOWS_BUILD, WINDOWS_OPEN, WINDOWS_REVEAL, WINDOWS_TYPES, encodedCommand, powershell } from './window'
 
 const VIDEO = '/Users/ana/videos/borrador.mp4'
 const FOLDER = '/Users/ana/videos'
 const README = '/project/app/README.md'
 const SOURCE = '/project/app/src/app.ts'
+const PDF = '/Users/ana/docs/cv.pdf'
 const CODE = ['import { run } from \'./run\'', '', '// Starts it', 'export async function start (port: number) {', '  const server = await run(port)', '  return server', '}', ''].join('\n')
 // The engine hands a hook the path as the host writes it: on a Windows host, `/a/b` is `C:\a\b`.
 const posix = (path: string) => path.replace(/^[A-Za-z]:/, '').replaceAll('\\', '/')
@@ -21,10 +22,12 @@ const SCREEN = { columns: 60, rows: 40, isFullscreen: true }
  * Everything beneath the mod: the session, the files that are there, the programs it runs, the
  * window's program, and what the engine draws.
  */
-function world (on: On, { system = 'Darwin', env = {}, cwd = '/project/app', program = 'shows' }: { system?: string; env?: Record<string, string>; cwd?: string; program?: 'shows' | 'fails' | 'crashes once' } = {}) {
+function world (on: On, { system = 'Darwin', env = {}, cwd = '/project/app', program = 'shows', isCompiled = false }: { system?: string; env?: Record<string, string>; cwd?: string; program?: 'shows' | 'fails' | 'crashes once' | 'exe blocked'; isCompiled?: boolean } = {}) {
   const clock = mock.clock(on, { now: 0 })
   mock.env(on, { HOME: '/Users/ana', ...env })
-  const there: Record<string, 'file' | 'dir'> = { [VIDEO]: 'file', [FOLDER]: 'dir', [README]: 'file', [SOURCE]: 'file' }
+  const there: Record<string, 'file' | 'dir'> = { [VIDEO]: 'file', [FOLDER]: 'dir', [README]: 'file', [SOURCE]: 'file', [PDF]: 'file' }
+  // On Windows, whether the window was compiled already: its exe in the temp folder.
+  on('fs.exists', ($, e) => ({ value: isCompiled && e.path.endsWith('.exe') }))
   const runs: string[][] = []
   const envs: (Record<string, string> | undefined)[] = []
   on('session.start', ($, e) => ({ cwd: e.cwd }))
@@ -52,6 +55,11 @@ function world (on: On, { system = 'Darwin', env = {}, cwd = '/project/app', pro
     try {
       if (program === 'fails') {
         yield { stream: 'stdout' as const, text: 'error: Cannot add type. Compilation is not allowed here.\n' }
+        return { value: { code: 1, signal: null } }
+      }
+      // An exe the system will not start from the temp folder.
+      if (program === 'exe blocked' && e.argv[0]!.endsWith('.exe')) {
+        yield { stream: 'stderr' as const, text: 'This program is blocked by group policy.\n' }
         return { value: { code: 1, signal: null } }
       }
       // PowerShell failing as it starts, many at once, says so in UTF-16.
@@ -338,11 +346,13 @@ test('under WSL a click selects the path in Explorer', async ($, on) => {
 })
 
 // A Windows session: its folders are `C:\…`, and no `uname` answers.
-const WINDOWS_HOST = { system: '', cwd: 'C:\\project\\app', env: { OS: 'Windows_NT', HOME: 'C:\\Users\\ana' } }
+const WINDOWS_HOST = { system: '', cwd: 'C:\\project\\app', env: { OS: 'Windows_NT', HOME: 'C:\\Users\\ana', TEMP: 'C:\\Users\\ana\\AppData\\Local\\Temp' } }
+// The compiled window, where the mod looks for it.
+const EXE = `C:\\Users\\ana\\AppData\\Local\\Temp\\${WINDOWS_BUILD}`
 // The longest command line Windows starts, and the longest variable it holds, in characters.
 const WINDOWS_LIMIT = 32_767
 
-test('on Windows the pointer on a path opens PowerShell\'s window, the C# it compiles told in the environment', async ($, on) => {
+test('on Windows the first hover has PowerShell compile the window into an exe, the C# told in the environment', async ($, on) => {
   const w = world(on, WINDOWS_HOST)
   await startSession($)
   const ui = await reply($, 'El arranque está en `src/app.ts:5`.')
@@ -350,11 +360,44 @@ test('on Windows the pointer on a path opens PowerShell\'s window, the C# it com
   await w.clock.advance(300)
   expect(w.windows).toHaveLength(1)
   expect(w.windows[0]!.argv).toEqual(['powershell', '-NoProfile', '-NonInteractive', '-STA', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encodedCommand(WINDOWS)])
-  expect(w.windows[0]!.env).toMatchObject({ QUICK_PEEK_FILE: 'C:/project/app/src/app.ts', QUICK_PEEK_TYPES: WINDOWS_TYPES, QUICK_PEEK_HINT: 'click: show in Explorer · Alt click: open' })
+  expect(w.windows[0]!.env).toMatchObject({ QUICK_PEEK_FILE: 'C:/project/app/src/app.ts', QUICK_PEEK_ASSEMBLY: EXE, QUICK_PEEK_TYPES: WINDOWS_TYPES, QUICK_PEEK_HINT: 'click: show in Explorer · Alt click: open' })
   expect(JSON.parse(w.windows[0]!.env.QUICK_PEEK_CODE!)).toMatchObject({ language: 'TypeScript', first: 1, mark: 5 })
   await ui.pointer({ type: 'leave', x: 3, y: 0, in: 'path:0:0' })
   await w.clock.advance(300)
   expect(w.windows[0]!.isEnded).toBe(true)
+})
+
+test('on Windows, once compiled, a hover starts the exe itself, no PowerShell; a PDF\'s page still has PowerShell render it', async ($, on) => {
+  const w = world(on, { ...WINDOWS_HOST, isCompiled: true })
+  await startSession($)
+  const ui = await reply($, `Mira \`src/app.ts:5\` y ${PDF}`)
+  await ui.pointer({ type: 'enter', x: 0, y: 0, in: 'path:0:0' })
+  await w.clock.advance(300)
+  expect(w.windows[0]!.argv).toEqual([EXE])
+  expect(w.windows[0]!.env).toMatchObject({ QUICK_PEEK_FILE: 'C:/project/app/src/app.ts', QUICK_PEEK_ASSEMBLY: EXE })
+  expect(w.windows[0]!.env.QUICK_PEEK_TYPES).toBeUndefined()
+  await ui.pointer({ type: 'leave', x: 3, y: 0, in: 'path:0:0' })
+  await w.clock.advance(300)
+  await ui.pointer({ type: 'enter', x: 0, y: 0, in: 'path:1:0' })
+  await w.clock.advance(300)
+  expect(w.windows[1]!.argv).toEqual(powershell(WINDOWS))
+  expect(w.windows[1]!.env).toMatchObject({ QUICK_PEEK_FILE: PDF, QUICK_PEEK_ASSEMBLY: EXE, QUICK_PEEK_TYPES: WINDOWS_TYPES })
+})
+
+test('on Windows an exe the system will not start (AppLocker) has PowerShell run the window, then and from then on', async ($, on) => {
+  const w = world(on, { ...WINDOWS_HOST, isCompiled: true, program: 'exe blocked' })
+  await startSession($)
+  const ui = await reply($, `Listo: ${VIDEO}`)
+  await ui.pointer({ type: 'enter', x: 0, y: 0, in: 'path:0:0' })
+  await w.clock.advance(300)
+  expect(w.windows.map(opened => opened.argv[0])).toEqual([EXE, 'powershell'])
+  expect(w.windows[1]!.isEnded).toBe(false)
+  expect(w.logs).toContainEqual(expect.stringMatching(/the window's exe did not start \(This program is blocked by group policy\); PowerShell runs it/))
+  await ui.pointer({ type: 'leave', x: 3, y: 0, in: 'path:0:0' })
+  await w.clock.advance(300)
+  await ui.pointer({ type: 'enter', x: 0, y: 0, in: 'path:0:0' })
+  await w.clock.advance(300)
+  expect(w.windows.map(opened => opened.argv[0])).toEqual([EXE, 'powershell', 'powershell'])
 })
 
 test('on Windows the window\'s command line, and the C# in QUICK_PEEK_TYPES, fit what Windows holds', async ($, on) => {

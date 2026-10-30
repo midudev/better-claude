@@ -1,6 +1,7 @@
-// The Windows window, run for real where it can be: PowerShell compiles it, and it lays out a file,
-// a file of code, a folder and a PDF without showing them (QUICK_PEEK_DRY), and says how large it
-// would be. Elsewhere these are skipped. `npm run test:node`
+// The Windows window, run for real where it can be: PowerShell compiles it into an exe, and it lays
+// out a file, a file of code, a folder and a PDF without showing them (QUICK_PEEK_DRY), and says how
+// large it would be; the exe does too, started on its own. Elsewhere these are skipped.
+// `npm run test:node`
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
@@ -8,18 +9,20 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { WINDOWS, WINDOWS_TYPES } from '../hooks/window.ts'
+import { WINDOWS, WINDOWS_BUILD, WINDOWS_TYPES } from '../hooks/window.ts'
 
 const skip = process.platform !== 'win32' && 'the window is Windows\''
 const folder = mkdtempSync(join(tmpdir(), 'quick-peek-'))
+// The exe compiled here, fresh: the first run compiles it.
+const assembly = join(folder, WINDOWS_BUILD)
 // What the program says when it lays a window out: its size, at 96 DPI, and its rows of text.
 const DRY = /^dry (\d+)x(\d+) (\d+) rows$/m
 
-/** The program as the mod runs it, told `env`, laying out instead of showing. */
-function run (env) {
-  const argv = ['-NoProfile', '-NonInteractive', '-STA', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(WINDOWS, 'utf16le').toString('base64')]
+/** The program as the mod runs it, told `env`, laying out instead of showing: through PowerShell, or the exe itself. */
+function run (env, { isDirect = false } = {}) {
+  const argv = isDirect ? [assembly] : ['powershell', '-NoProfile', '-NonInteractive', '-STA', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(WINDOWS, 'utf16le').toString('base64')]
   const started = performance.now()
-  const result = spawnSync('powershell', argv, { env: { ...process.env, QUICK_PEEK_TYPES: WINDOWS_TYPES, QUICK_PEEK_DRY: '1', ...env }, encoding: 'utf8', timeout: 120_000 })
+  const result = spawnSync(argv[0], argv.slice(1), { env: { ...process.env, QUICK_PEEK_ASSEMBLY: assembly, QUICK_PEEK_TYPES: WINDOWS_TYPES, QUICK_PEEK_DRY: '1', ...env }, encoding: 'utf8', timeout: 120_000 })
   return { said: result.stdout, status: result.status, ms: Math.round(performance.now() - started) }
 }
 
@@ -54,6 +57,17 @@ test('compiles the window and lays out a file: its picture, name, details and fo
   assert.equal(said.match(DRY)[3], '4')
   // Compiled once: the next run loads it.
   t.diagnostic(`next run, compiled: ${run({ QUICK_PEEK_FILE: file }).ms} ms`)
+  // The exe on its own, as later hovers start it: the same window.
+  const direct = run({ QUICK_PEEK_FILE: file, QUICK_PEEK_HINT: 'click: show in Explorer' }, { isDirect: true })
+  t.diagnostic(`the exe on its own: ${direct.ms} ms`)
+  assert.equal(direct.status, 0, direct.said)
+  assert.equal(direct.said.match(DRY)?.[0], said.match(DRY)[0])
+})
+
+test('the exe on its own says a path that is not there', { skip }, () => {
+  const { said, status } = run({ QUICK_PEEK_FILE: join(folder, 'missing.txt') }, { isDirect: true })
+  assert.equal(status, 0)
+  assert.match(said, /^error: not there\r?$/m)
 })
 
 test('lays out a file of code: its lines on a plate at least as wide as the text under it', { skip }, () => {

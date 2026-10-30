@@ -1,5 +1,5 @@
 // The program that previews a path in a window of its own, by the pointer, outside the terminal:
-// macOS's, run by `osascript`, and Windows', run by PowerShell, with what it needs in the
+// macOS's, run by `osascript`, and Windows', an exe PowerShell compiles, with what it needs in the
 // environment (QUICK_PEEK_FILE, the path; QUICK_PEEK_LIFE, how many seconds at most it stays;
 // QUICK_PEEK_HINT, the line that says what a click does; QUICK_PEEK_CODE, for a file of code or
 // text, the lines it shows as JSON, an `Excerpt` without its source). It writes `shown` once the
@@ -245,7 +245,7 @@ function run () {
 `
 
 /**
- * Windows: the window, in C#, which `WINDOWS` compiles once and runs. A Windows Forms tool window,
+ * Windows: the window, in C#, which `WINDOWS` compiles once into an exe. A Windows Forms tool window,
  * never activated, the pointer passing through it. A file of code or text shows its lines,
  * coloured, numbered, the one the path names lit; any other file the shell's thumbnail (a video's
  * frame, an image, a document's first page; a PDF's first page, which `WINDOWS` renders), else its
@@ -644,12 +644,32 @@ public class QuickPeekWindow : Form {
   [DllImport("dwmapi.dll")]
   static extern int DwmSetWindowAttribute (IntPtr window, int attribute, ref int value, int size);
 }
+
+// The window started on its own, no PowerShell: the path told in QUICK_PEEK_FILE.
+public static class QuickPeekMain {
+  [STAThread]
+  public static int Main () {
+    try {
+      string path = Path.GetFullPath(Environment.GetEnvironmentVariable("QUICK_PEEK_FILE"));
+      if (!File.Exists(path) && !Directory.Exists(path)) {
+        Console.Out.WriteLine("error: not there");
+        return 0;
+      }
+      return QuickPeekWindow.Run(path, null);
+    } catch (Exception error) {
+      Console.Out.WriteLine("error: " + error.Message);
+      return 1;
+    }
+  }
+}
 `
 
 /**
  * Windows: PowerShell, which compiles the window (`WINDOWS_TYPES`, told in QUICK_PEEK_TYPES: too
- * long for a command line) once into the temp folder, named by its hash, then loads it from there;
- * a PDF's first page is rendered by Windows.Data.Pdf, as the shell may have no thumbnail for it.
+ * long for a command line) once into an exe (QUICK_PEEK_ASSEMBLY, named by the source's hash in the
+ * temp folder), then runs it. Later hovers start that exe on their own; PowerShell still runs it
+ * for a PDF, whose first page it renders with Windows.Data.Pdf, as the shell may have no thumbnail
+ * for it, and where the exe may not start.
  */
 export const WINDOWS = String.raw`
 $ErrorActionPreference = 'Stop'
@@ -658,14 +678,12 @@ $ProgressPreference = 'SilentlyContinue'
 try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
 try {
   Add-Type -AssemblyName System.Windows.Forms, System.Drawing
-  $source = $env:QUICK_PEEK_TYPES
-  $hash = [BitConverter]::ToString([Security.Cryptography.SHA1]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($source))).Replace('-', '').Substring(0, 12)
-  $assembly = Join-Path $env:TEMP "quick-peek-window-$hash.dll"
+  $assembly = $env:QUICK_PEEK_ASSEMBLY
   if (-not (Test-Path -LiteralPath $assembly)) {
     # Compiled aside, then moved in: another preview compiling it at the same time finds it whole.
-    $building = Join-Path $env:TEMP "quick-peek-window-$hash-$PID.dll"
+    $building = $assembly -replace '\.exe$', "-$PID.exe"
     try {
-      Add-Type -OutputAssembly $building -OutputType Library -ReferencedAssemblies System.Windows.Forms, System.Drawing, System.Web.Extensions -TypeDefinition $source
+      Add-Type -OutputAssembly $building -OutputType WindowsApplication -ReferencedAssemblies System.Windows.Forms, System.Drawing, System.Web.Extensions -TypeDefinition $env:QUICK_PEEK_TYPES
       Move-Item -LiteralPath $building -Destination $assembly
     } catch {
       if (-not (Test-Path -LiteralPath $assembly)) { throw }
@@ -673,7 +691,7 @@ try {
       Remove-Item -LiteralPath $building -ErrorAction SilentlyContinue
     }
   }
-  Add-Type -Path $assembly
+  $null = [Reflection.Assembly]::LoadFrom($assembly)
   $path = [IO.Path]::GetFullPath($env:QUICK_PEEK_FILE)
   if (-not (Test-Path -LiteralPath $path)) { [Console]::Out.WriteLine('error: not there'); exit 0 }
   $page = $null
@@ -725,6 +743,13 @@ try {
  */
 export const WINDOWS_REVEAL = String.raw`Start-Process explorer -ArgumentList ('/select,"' + $env:QUICK_PEEK_FILE + '"')`
 export const WINDOWS_OPEN = String.raw`Invoke-Item -LiteralPath $env:QUICK_PEEK_FILE`
+
+/** The name the compiled window takes: a hash of its source (FNV-1a), so a new source compiles anew. */
+export const WINDOWS_BUILD = (() => {
+  let hash = 0x811c9dc5
+  for (let i = 0; i < WINDOWS_TYPES.length; i++) hash = Math.imul(hash ^ WINDOWS_TYPES.charCodeAt(i), 0x01000193)
+  return `quick-peek-window-${(hash >>> 0).toString(16).padStart(8, '0')}.exe`
+})()
 
 const encodedCache = new Map<string, string>()
 

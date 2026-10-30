@@ -5,7 +5,7 @@ import type { Excerpt } from './code'
 import { blocks, inline, items, markerOf, widthOf, wrap } from './markdown'
 import type { Item, Row, Run } from './markdown'
 import { lineOf, pathOfSpan, pathsIn, resolve } from './paths'
-import { MACOS, WINDOWS, WINDOWS_OPEN, WINDOWS_REVEAL, WINDOWS_TYPES, powershell } from './window'
+import { MACOS, WINDOWS, WINDOWS_BUILD, WINDOWS_OPEN, WINDOWS_REVEAL, WINDOWS_TYPES, powershell } from './window'
 
 type Engine = EngineInterface
 type Ui = Elements['terminal']
@@ -60,11 +60,14 @@ let platform: Promise<Platform> | undefined
 let wsl: Promise<boolean> | undefined
 // The system whose window a hover opens by the pointer (macOS, Windows); else none, and each path
 // carries a card the terminal reveals over it. The path the pointer is on, and the part it is on;
-// the window open; how many programs in a row ended without showing one.
+// the window open; how many programs in a row ended without showing one. On Windows, where the
+// compiled window is, and whether the system refused to start it.
 let windowing: 'macos' | 'windows' | undefined
 let hovered: { path: string; line: number | undefined; target: string } | undefined
 let window: { path: string; line: number | undefined; isOpen: boolean } | undefined
 let failures = 0
+let assembly: Promise<string> | undefined
+let isExeBlocked = false
 
 /** The system the session runs on, asked once. */
 function platformOf ($: Engine) {
@@ -379,9 +382,40 @@ async function openWindow ($: Engine, path: string, line: number | undefined) {
     const { source, ...shown } = code
     env.QUICK_PEEK_CODE = JSON.stringify(shown)
   }
-  // Windows' window is C#, too long for a command line: PowerShell is told it in the environment.
-  const argv = system === 'macos' ? ['osascript', '-l', 'JavaScript', '-e', MACOS] : powershell(WINDOWS)
-  if (system === 'windows') env.QUICK_PEEK_TYPES = WINDOWS_TYPES
+  let argv = ['osascript', '-l', 'JavaScript', '-e', MACOS]
+  let isDirect = false
+  if (system === 'windows') {
+    // The window, compiled once into an exe by PowerShell, starts on its own: in a third of
+    // PowerShell's time and memory. PowerShell runs it for a PDF, whose first page it renders, and
+    // where the exe does not start; it is told the C#, too long for a command line, in the environment.
+    const exe = await assemblyOf($)
+    env.QUICK_PEEK_ASSEMBLY = exe
+    isDirect = !isExeBlocked && !(!code && /\.pdf$/i.test(path)) && (await $.fs.exists(exe).catch(() => false))
+    argv = isDirect ? [exe] : powershell(WINDOWS)
+    if (!isDirect) env.QUICK_PEEK_TYPES = WINDOWS_TYPES
+  }
+  let { isShown, said } = await show($, opening, argv, env)
+  if (isDirect && !isShown && opening.isOpen && !/^error: not there/m.test(said)) {
+    // An exe the system will not start from the temp folder (AppLocker): PowerShell runs it from now on.
+    isExeBlocked = true
+    $.ui.log(`quick-peek: the window's exe did not start (${reasonOf(said)}); PowerShell runs it`, { to: 'debug' })
+    ;({ isShown, said } = await show($, opening, powershell(WINDOWS), { ...env, QUICK_PEEK_TYPES: WINDOWS_TYPES }))
+  }
+  if (window === opening) window = undefined
+  if (isShown) failures = 0
+  if (isShown || !opening.isOpen || /^error: not there/m.test(said)) return
+  // A program that failed to start (many PowerShells at once) may start the next time.
+  if (!/^error/m.test(said) && ++failures < FAILURES) {
+    $.ui.log(`quick-peek: no window (${reasonOf(said)}); the next hover tries again`, { to: 'debug' })
+    return
+  }
+  $.ui.log(`quick-peek: no window (${reasonOf(said)}); the terminal shows the cards`, { to: 'debug' })
+  windowing = undefined
+  plans.clear()
+}
+
+/** Runs the window's program till it ends or `opening` closes: whether it showed a window, and what it said. */
+async function show ($: Engine, opening: { isOpen: boolean }, argv: string[], env: Record<string, string>) {
   let isShown = false
   let said = ''
   try {
@@ -393,19 +427,16 @@ async function openWindow ($: Engine, path: string, line: number | undefined) {
   } catch (error) {
     said += error instanceof Error ? error.message : String(error)
   }
-  if (window === opening) window = undefined
-  if (isShown) failures = 0
-  if (isShown || !opening.isOpen || /^error: not there/m.test(said)) return
-  // PowerShell may write in UTF-16: its NULs dropped, what it said reads whole.
-  const reason = said.replaceAll('\u0000', '').replace(/\.\r?\n/g, '').trim().slice(0, 300) || 'the program could not start'
-  // A program that failed to start (many PowerShells at once) may start the next time.
-  if (!/^error/m.test(said) && ++failures < FAILURES) {
-    $.ui.log(`quick-peek: no window (${reason}); the next hover tries again`, { to: 'debug' })
-    return
-  }
-  $.ui.log(`quick-peek: no window (${reason}); the terminal shows the cards`, { to: 'debug' })
-  windowing = undefined
-  plans.clear()
+  return { isShown, said }
+}
+
+/** What a program said as it failed, to log: PowerShell may write in UTF-16, its NULs dropped. */
+const reasonOf = (said: string) => said.replaceAll('\u0000', '').replace(/\.\r?\n/g, '').trim().slice(0, 300) || 'the program could not start'
+
+/** Where the compiled window is: the temp folder, named by its source's hash. */
+function assemblyOf ($: Engine) {
+  assembly ??= (async () => `${((await $.env.get('TEMP')) ?? 'C:\\Windows\\Temp').replace(/[\\/]+$/, '')}\\${WINDOWS_BUILD}`)()
+  return assembly
 }
 
 function closeWindow () {
@@ -447,6 +478,7 @@ export const register: Register = (on, options) => {
     const hasWindow = options.window !== false && e.isInteractive && sshConnection === undefined && sshTty === undefined
     windowing = hasWindow && (system === 'macos' || system === 'windows') ? system : undefined
     failures = 0
+    isExeBlocked = false
     plans.clear()
     stats.clear()
     excerpts.clear()
