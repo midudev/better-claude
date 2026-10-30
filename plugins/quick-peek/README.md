@@ -26,10 +26,10 @@ A path a row cannot hold is drawn in parts, cut after a `/`, and each part is th
 | --- | --- | --- |
 | macOS | Finder, the file selected | A window by the pointer, with the Quick Look thumbnail |
 | Linux | The file manager, the file selected (`org.freedesktop.FileManager1`), else its folder with `xdg-open` | A one-line card over the path: name, size, age; a file of code, its first 8 lines under it |
-| Windows | Explorer, the file selected (`explorer /select,`) | The card |
+| Windows | Explorer, the file selected (`explorer /select,`) | A window by the pointer, with the shell's thumbnail (a PDF's first page, rendered by Windows itself), run by PowerShell: nothing to install |
 | WSL | Windows' Explorer, the path turned into its Windows form by `wslpath -w` | The card |
 
-Turn the window off with the **Preview in a window** option (`/config`) to get the card on macOS too. Over SSH the window would open on the other machine, so there the card shows.
+Turn the window off with the **Preview in a window** option (`/config`) to get the card on macOS and Windows too. Over SSH the window would open on the other machine, so there the card shows. On Windows the date under the name is in your regional format, not an age; where PowerShell may not compile code (Constrained Language Mode, AppLocker), the card shows.
 
 ## Install
 
@@ -59,6 +59,7 @@ One hooks module ([`hooks/register.tsx`](hooks/register.tsx)), a surface module 
 - With none that leads somewhere, Claude Code draws the reply. Otherwise the mod draws it: the bullet, the blocks with no path as one `Markdown` each, and the others wrapped into rows the way Claude Code wraps a reply, each part of a path a `Client` drawing that part in the color of inline code. The tree replaces only Claude Code's own node, so what other mods draw around a reply stays.
 - Each `Client` posts when the pointer comes onto it, moves on it and leaves it, and when it is clicked; a `ui.message` hook opens and closes the preview, or shows the path in the file manager.
 - On macOS a hover starts `osascript` with a JavaScript for Automation program, told the path (`QUICK_PEEK_FILE`), the picture's largest side and how long it may stay. It draws an AppKit panel that never takes the focus or the pointer, with the thumbnail from `QLThumbnailImageCreate` and the kind, size and date from the file's resource values, formatted by the system. It says `shown`, then a `.` every tenth of a second, so the mod wakes to end it when the pointer leaves.
+- On Windows a hover starts `powershell -STA` with the same protocol. Its window is a Windows Forms tool window in C#, never activated, the pointer passing through it, that PowerShell compiles once into `%TEMP%` (`quick-peek-window-<hash>.dll`: the first hover takes a second or two, the rest a few tenths) and is told in `QUICK_PEEK_TYPES`, as a command line would not hold it. The picture is the shell's thumbnail (`IShellItemImageFactory`), else its icon; a PDF's first page is rendered by `Windows.Data.Pdf`, as the shell may have no thumbnail for it. The kind and size are the shell's words.
 - A file of code or text is known by its name. The mod reads it with `$.fs.read`, cuts the lines a preview shows (around the line the path names), and colours them with a regex highlighter per language; the window is told them as JSON (`QUICK_PEEK_CODE`) and draws them on a plate, one monospaced label a line, in place of the thumbnail.
 - Without a window, each part of a path is a keyed `Box` holding a card drawn `display: "none"`, which the terminal reveals while the pointer is on the path, with no hook running. A file of code adds its lines to the card as a `Code` element, which Claude Code colours with its own highlighter.
 
