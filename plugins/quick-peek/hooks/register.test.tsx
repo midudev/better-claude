@@ -200,6 +200,25 @@ test('the pointer on a path opens its preview by the pointer; off it, the previe
   expect(w.windows[0]!.isEnded).toBe(true)
 })
 
+test('a pointer that leaves and comes straight back keeps the one window, which closes once it is gone a while', async ($, on) => {
+  const w = world(on)
+  await startSession($)
+  const ui = await reply($, `Listo: ${VIDEO}`)
+  // Windows' terminals say the pointer left a few milliseconds after it came on.
+  await ui.pointer({ type: 'enter', x: 0, y: 0, in: 'path:0:0' })
+  await ui.pointer({ type: 'leave', x: 0, y: 0, in: 'path:0:0' })
+  await w.clock.advance(20)
+  await ui.pointer({ type: 'enter', x: 1, y: 0, in: 'path:0:0' })
+  await w.clock.advance(500)
+  expect(w.windows).toHaveLength(1)
+  expect(w.windows[0]!.isEnded).toBe(false)
+  await ui.pointer({ type: 'leave', x: 3, y: 0, in: 'path:0:0' })
+  await w.clock.advance(100)
+  expect(w.windows[0]!.isEnded).toBe(false)
+  await w.clock.advance(300)
+  expect(w.windows[0]!.isEnded).toBe(true)
+})
+
 test('a file of code shows its lines in the window, around the line its path names', async ($, on) => {
   const w = world(on)
   await startSession($)
