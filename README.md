@@ -10,7 +10,7 @@ Plugins and mods for Claude Code by midudev, one per folder in [`plugins/`](plug
 | **Image Preview** | Hover a pasted `[Image #N]` to see the picture, while you write and on the prompts you sent. | [`plugins/image-preview/`](plugins/image-preview/README.md) |
 | **Sub Meter** | Subscription usage at the bottom right: the 5-hour and weekly windows, as a bar. | [`plugins/sub-meter/`](plugins/sub-meter/README.md) |
 | **Context Meter** | The session's context window fill, right above the prompt: yellow when it is time to `/compact`, red when a new session is better. | [`plugins/context-meter/`](plugins/context-meter/README.md) |
-| **Commit** | `/commit` asks commit + push, commit only or a new branch, then splits your changes into Conventional Commits, on Haiku 5.5. | [`plugins/commit/`](plugins/commit/README.md) |
+| **Commit** | `/commit` asks commit + push, commit only or a new branch, offers to close the GitHub issues you fix, then splits your changes into Conventional Commits, on Haiku 5.5. | [`plugins/commit/`](plugins/commit/README.md) |
 | **Narrator** | Click `⏸︎ narrator off` in the footer, or `/narrator`, and Claude tells you out loud what it did after each turn, in your language, with the best free voice your system has. | [`plugins/narrator/`](plugins/narrator/README.md) |
 | **Time Machine** | Every turn that changes files is a git snapshot: `/timeline` puts the files back as before any turn, Bash changes included. | [`plugins/time-machine/`](plugins/time-machine/README.md) |
 
