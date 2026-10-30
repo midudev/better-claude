@@ -12,6 +12,8 @@ const FOLDER = '/Users/ana/videos'
 const README = '/project/app/README.md'
 const SOURCE = '/project/app/src/app.ts'
 const CODE = ['import { run } from \'./run\'', '', '// Starts it', 'export async function start (port: number) {', '  const server = await run(port)', '  return server', '}', ''].join('\n')
+// The engine hands a hook the path as the host writes it: on a Windows host, `/a/b` is `C:\a\b`.
+const posix = (path: string) => path.replace(/^[A-Za-z]:/, '').replaceAll('\\', '/')
 const SCREEN = { columns: 60, rows: 40, isFullscreen: true }
 
 /**
@@ -32,11 +34,12 @@ function world (on: On, { system = 'Darwin', env = {}, cwd = '/project/app' }: {
     return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   on('fs.stat', ($, e) => {
-    const kind = there[e.path]
+    const path = posix(e.path)
+    const kind = there[path]
     if (!kind) return { deny: `ENOENT: ${e.path}` }
-    return { value: { kind, size: e.path === SOURCE ? CODE.length : 12 * 1024 * 1024, mtimeMs: 0, isLink: false } }
+    return { value: { kind, size: path === SOURCE ? CODE.length : 12 * 1024 * 1024, mtimeMs: 0, isLink: false } }
   })
-  on('fs.read', ($, e) => (e.path === SOURCE ? { value: CODE } : { deny: `ENOENT: ${e.path}` }))
+  on('fs.read', ($, e) => (posix(e.path) === SOURCE ? { value: CODE } : { deny: `ENOENT: ${e.path}` }))
   // The window's program: it says `shown`, then `.` every tenth of a second till it is ended.
   const windows: { env: Record<string, string>; isEnded: boolean }[] = []
   on('process.spawn', async function * ($, e) {
