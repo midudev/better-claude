@@ -79,6 +79,11 @@ test('finds absolute, home, relative and bare paths, and cuts what a sentence ad
   expect(pathOfSpan('npm run build')).toBeUndefined()
   expect(resolve('../b/./c.txt', '/project/app', '/Users/ana')).toBe('/project/b/c.txt')
   expect(resolve('~/x', '/project/app', '/Users/ana')).toBe('/Users/ana/x')
+  // On Windows the session names its folders `C:\…`: a path that lands in one keeps the drive.
+  expect(resolve('src/../README.md', 'C:\\project\\app', 'C:\\Users\\ana')).toBe('C:/project/app/README.md')
+  expect(resolve('~/x', 'C:\\project\\app', 'C:\\Users\\ana')).toBe('C:/Users/ana/x')
+  expect(resolve('C:\\Users\\ana\\x.mp4', '/project/app', undefined)).toBe('C:\\Users\\ana\\x.mp4')
+  expect(found('Mira C:/Users/ana/x.mp4 y C:\\Users\\ana\\y.md')).toEqual([['C:/Users/ana/x.mp4', 'C:/Users/ana/x.mp4'], ['C:\\Users\\ana\\y.md', 'C:\\Users\\ana\\y.md']])
 })
 
 test('a path with a line names it; a file of code or text is known by its name, and its lines are tokens', () => {
@@ -141,6 +146,14 @@ test('after a `cd` into a folder of the project, a relative path leads from ther
   expect(await ui.find({ key: 'path:0:0' })).toMatchObject({ props: { props: { label: 'src/app.ts', path: SOURCE } } })
   expect(await ui.find({ key: 'path:1:0' })).toMatchObject({ props: { props: { label: 'app.ts', path: SOURCE } } })
   expect(await ui.find({ key: 'path:2:0' })).toMatchObject({ props: { props: { label: 'README.md', path: README } } })
+})
+
+test('on Windows a relative path and one from home lead from the session\'s `C:\\` folders', async ($, on) => {
+  world(on, { system: '', cwd: 'C:\\project\\app', env: { OS: 'Windows_NT', HOME: 'C:\\Users\\ana' } })
+  await startSession($)
+  const ui = await reply($, 'Mira `src/app.ts:5` y ~/videos/borrador.mp4')
+  expect(await ui.find({ key: 'path:0:0' })).toMatchObject({ props: { props: { label: 'src/app.ts:5', path: 'C:/project/app/src/app.ts', line: 5 } } })
+  expect(await ui.find({ key: 'path:1:0' })).toMatchObject({ props: { props: { label: '~/videos/borrador.mp4', path: 'C:/Users/ana/videos/borrador.mp4' } } })
 })
 
 test('a reply naming no path that is there is the engine\'s, and so is one off fullscreen', async ($, on) => {

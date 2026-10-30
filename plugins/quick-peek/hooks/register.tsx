@@ -209,7 +209,7 @@ const ago = (ms: number) => {
 
 /** The line the terminal shows over a path where no window can: what it is, and what a click does. */
 function cardOf (target: Target) {
-  const name = target.path.slice(target.path.lastIndexOf('/') + 1) || target.path
+  const name = target.path.slice(Math.max(target.path.lastIndexOf('/'), target.path.lastIndexOf('\\')) + 1) || target.path
   const what = target.stat.kind === 'dir' ? 'folder' : sizeOf(target.stat.size)
   return ` ${name} · ${what} · ${ago(target.stat.mtimeMs)} · click: show in folder `
 }

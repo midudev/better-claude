@@ -15,14 +15,16 @@ const URL = /\b[a-z][a-z0-9+.-]*:\/\/[^\s<>()]+/gi
 const CANDIDATE = new RegExp(
   [
     String.raw`(?:~|\.{1,2})?\/[^\s\`'"<>()[\]{}|*]+`,
-    String.raw`[A-Za-z]:\\[^\s\`'"<>()[\]{}|*]+`,
+    String.raw`[A-Za-z]:[\\/][^\s\`'"<>()[\]{}|*]+`,
     String.raw`[\w@+-][\w@.+-]*(?:\/[\w@.+-]+)+\/?`,
     String.raw`[\w@+-][\w@.+-]*\.[A-Za-z][A-Za-z0-9]{0,9}`
   ].map(source => `(?<![\\w/.~:\\\\@-])(?:${source})(?::\\d+(?::\\d+)?)?`).join('|'),
   'g'
 )
 // A whole inline code span that is a path: it may hold spaces when it starts as a path does.
-const SPAN = /^(?:(?:~|\.{1,2})?\/|[A-Za-z]:\\)[^\n`]*[^\s`]$/
+const SPAN = /^(?:(?:~|\.{1,2})?\/|[A-Za-z]:[\\/])[^\n`]*[^\s`]$/
+// A Windows path's drive.
+const DRIVE = /^[A-Za-z]:[\\/]/
 
 /** The path `found` names, with what a sentence or a line number adds after it cut; none when nothing is left. */
 function clean (text: string) {
@@ -62,7 +64,9 @@ export function pathOfSpan (code: string): string | undefined {
 
 /**
  * Where `target` lands: home for `~`, the working folder for a relative path; `.` and `..`
- * folded, no trailing `/`. A Windows path stays as written.
+ * folded, no trailing `/`. A Windows path written with `\` stays as written; one that lands in a
+ * Windows folder (`C:\Users\ana`, as the session names it there) keeps its drive, its separators
+ * `/` (`C:/Users/ana/x`).
  */
 export function resolve (target: string, cwd: string, home: string | undefined) {
   if (/^[A-Za-z]:\\/.test(target)) return target
@@ -70,14 +74,16 @@ export function resolve (target: string, cwd: string, home: string | undefined) 
   if (path === '~' || path.startsWith('~/')) {
     if (!home) return undefined
     path = home + path.slice(1)
-  } else if (!path.startsWith('/')) {
+  } else if (!path.startsWith('/') && !DRIVE.test(path)) {
     path = `${cwd}/${path}`
   }
+  const drive = DRIVE.test(path) ? path.slice(0, 2) : ''
+  if (drive) path = path.slice(2).replaceAll('\\', '/')
   const parts: string[] = []
   for (const part of path.split('/')) {
     if (part === '' || part === '.') continue
     if (part === '..') parts.pop()
     else parts.push(part)
   }
-  return `/${parts.join('/')}`
+  return `${drive}/${parts.join('/')}`
 }
