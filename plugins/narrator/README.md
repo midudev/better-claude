@@ -65,6 +65,18 @@ In `/config`:
 - **Read short answers as they are**: an answer up to this many characters (200 by default) is read out as it is, with no Haiku call to retell it. `0`: Haiku narrates every answer.
 - **Model that writes the narration**: `haiku` by default.
 - **Speak command**: a program of your own to say each narration with, in place of the system's voice, on macOS and Linux (WSL too). The shell runs it with the narration as its last argument, so `my-tts --voice Mónica` runs `my-tts --voice Mónica "<narration>"`; it can also read `NARRATOR_TEXT` and `NARRATOR_LANG`, the narration and its language. It waits its turn in the line like any voice, and a new prompt ends it. The Voice and Speed settings are the program's to read (`NARRATOR_VOICE`, `NARRATOR_SPEED`). If it fails, the engine's own voice says the narration. On Windows it is left aside. Empty: the system's voice.
+- **Speech server**: the address of a speech server with OpenAI's speech API, to say each narration with in place of the system's voice, on macOS and Linux (WSL too): what comes before `/audio/speech`, as `http://localhost:8880/v1` for [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI), or `https://api.openai.com/v1`. The narration goes to it with `curl`, at the Speed setting's pace, and the WAV that comes back is played with `afplay`, `pw-play`, `paplay`, `aplay` or `ffplay`. It waits its turn in the line like any voice, and a new prompt ends it. If it does not answer, or answers with no audio, the system's voice says the narration. A speak command, when set, comes first. On Windows it is left aside. Empty: the system's voice.
+- **Speech server voice**: the voice to ask the server for: one (`af_heart`), or one per language beside one for the others, `af_heart, es:ef_dora, fr:ff_siwis`; the language's own, else the one with none, else English's. `/narrator test bf_emma` tries one. Empty: `alloy`, which Kokoro-FastAPI also knows.
+- **Speech server model**: `tts-1` by default, which Kokoro-FastAPI also takes.
+- **Speech server key**: an API key, sent as a Bearer token, for a server that asks for one. It reaches `curl` on its standard input, never on a command line.
+
+### A speech server: Kokoro
+
+[Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) is a small, natural, free voice that runs on your machine. Start its server, then set **Speech server** to `http://localhost:8880/v1` and **Speech server voice** to the voices you want (its `/v1/audio/voices` lists them):
+
+```bash
+docker run -d -p 8880:8880 ghcr.io/remsky/kokoro-fastapi-cpu:latest
+```
 
 ## Several windows
 

@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderNode, RenderViewport, Timer } from 'claude-code'
 
-import { LINUX, MACOS, MACOS_VOICES, QUEUE, WINDOWS, WINDOWS_VOICES, dispatcherRate, espeakWords, powershell } from './speaker'
+import { LINUX, MACOS, MACOS_VOICES, QUEUE, SERVER, WINDOWS, WINDOWS_VOICES, dispatcherRate, espeakWords, powershell, serverVoiceFor } from './speaker'
 import { cut, finalQuestion, guessLanguage, parseNarration, plain, withQuestion } from './text'
 
 type Platform = 'macos' | 'windows' | 'linux' | 'other'
@@ -89,8 +89,10 @@ const sweepStep = atom({ plugin: 'narrator', key: 'sweepStep' } as const, 0)
 
 /** An answer this short is read out as it is: no model call to write a narration of it. */
 const SHORT_ANSWER = 200
+/** The model a speech server is asked for: OpenAI's name, which Kokoro-FastAPI also takes. */
+const SERVER_MODEL = 'tts-1'
 
-let settings = { voice: '', model: 'haiku', speed: SPEED, shortAnswer: SHORT_ANSWER, language: '', command: '' }
+let settings = { voice: '', model: 'haiku', speed: SPEED, shortAnswer: SHORT_ANSWER, language: '', command: '', server: '', serverVoice: '', serverModel: SERVER_MODEL, serverKey: '' }
 // The main loop's turn so far: the prompt that started it and each tool call it made.
 let request = ''
 let actions: string[] = []
@@ -197,8 +199,11 @@ function linuxSpeechOf ($: EngineInterface) {
 /** A speaker that first waits its turn in the line every window shares (PowerShell waits in its own). */
 const inLine = (command: Command): Command => ({ ...command, argv: ['sh', '-c', QUEUE, 'narrator-line', ...command.argv] })
 
-/** The programs that can say `text` here, best first; `ticket`, when it was ready, is its place in the line. */
-async function speakersFor ($: EngineInterface, text: string, language: string, voice: string, ticket: string): Promise<Command[]> {
+/**
+ * The programs that can say `text` here, best first; `ticket`, when it was ready, is its place in the
+ * line. `serverVoice` is the voice a speech server is asked for.
+ */
+async function speakersFor ($: EngineInterface, text: string, language: string, voice: string, serverVoice: string, ticket: string): Promise<Command[]> {
   const env = { NARRATOR_TEXT: text, NARRATOR_LANG: language, NARRATOR_VOICE: voice, NARRATOR_SPEED: String(settings.speed), NARRATOR_TICKET: ticket }
   const system = await platformOf($)
   // A speak command of the person's own, run by the shell with the narration as its last argument.
@@ -206,6 +211,18 @@ async function speakersFor ($: EngineInterface, text: string, language: string, 
     const argv = ['sh', '-c', LINUX, 'narrator', 'sh', '-c', `exec ${settings.command} "$1"`, 'narrator-command', text]
     return [inLine({ argv, env: { ...env, NARRATOR_SPEAKER: settings.command }, program: settings.command })]
   }
+  const speakers = await systemSpeakersFor($, system, env, text, language, voice)
+  if (!settings.server || system === 'windows') return speakers
+  // A speech server first, the system's voices after it, should it not answer.
+  const body = JSON.stringify({ model: settings.serverModel, input: text, voice: serverVoice, response_format: 'wav', speed: settings.speed })
+  const speaker = `${serverVoice} (speech server)`
+  const serverEnv: Record<string, string> = { ...env, NARRATOR_SERVER: settings.server, NARRATOR_BODY: body, NARRATOR_SPEAKER: speaker }
+  if (settings.serverKey) serverEnv.NARRATOR_SERVER_KEY = settings.serverKey
+  return [inLine({ argv: ['sh', '-c', LINUX, 'narrator', 'sh', '-c', SERVER, 'narrator-server'], env: serverEnv, program: 'speech server' }), ...speakers]
+}
+
+/** The system's own programs that can say `text`, best first. */
+async function systemSpeakersFor ($: EngineInterface, system: Platform, env: Record<string, string>, text: string, language: string, voice: string): Promise<Command[]> {
   if (system === 'macos') return [inLine({ argv: ['osascript', '-l', 'JavaScript', '-e', MACOS], env, program: 'osascript' })]
   if (system === 'windows') return [{ argv: powershell(WINDOWS), env, program: 'powershell' }]
   if (system !== 'linux') return []
@@ -361,10 +378,10 @@ async function play ($: EngineInterface, narration: Narration, command: Command)
 }
 
 /** Says `text` with the best speaker that works here, the engine's own synthesizer last; how, if it did. */
-async function speak ($: EngineInterface, narration: Narration, text: string, language: string, voice = settings.voice): Promise<Spoke | undefined> {
+async function speak ($: EngineInterface, narration: Narration, text: string, language: string, voice = settings.voice, serverVoice = serverVoiceFor(settings.serverVoice, language)): Promise<Spoke | undefined> {
   // Every window shares one line, so two sessions that finish together are said one after the other.
   const ticket = String(await $.clock.now()).padStart(13, '0')
-  for (const command of await speakersFor($, text, language, voice, ticket)) {
+  for (const command of await speakersFor($, text, language, voice, serverVoice, ticket)) {
     const spoke = await play($, narration, command)
     if (spoke || !narration.isActive) return spoke
   }
@@ -384,12 +401,13 @@ async function speak ($: EngineInterface, narration: Narration, text: string, la
 }
 
 /** Says a short sample with `voice` (empty: the one picked for English), and what came of it. */
-async function testVoice ($: EngineInterface, voice: string) {
+/** `named`, a voice the person named, is also the one the speech server is asked for, where there is one. */
+async function testVoice ($: EngineInterface, voice: string, named = '') {
   silence()
   const narration: Narration = { isActive: true, abort: new AbortController() }
   current = narration
   try {
-    const spoke = await speak($, narration, PREVIEW, 'en', voice)
+    const spoke = await speak($, narration, PREVIEW, 'en', voice, named || undefined)
     if (!narration.isActive) return 'Narrator: preview stopped.'
     if (!spoke) return 'Narrator: could not play the voice preview.'
     if (spoke.isSkipped) return 'Narrator: not previewed, other sessions are speaking. Try again in a moment.'
@@ -583,7 +601,12 @@ export const register: Register = (on, options) => {
     speed: speed > 0 ? speed : SPEED,
     shortAnswer: shortAnswer >= 0 ? shortAnswer : SHORT_ANSWER,
     language: languageOf(options.language),
-    command: String(options.command ?? '').trim()
+    command: String(options.command ?? '').trim(),
+    // Kokoro-FastAPI's `http://localhost:8880/v1`: what comes before `/audio/speech`.
+    server: String(options.server ?? '').trim().replace(/\/+$/, ''),
+    serverVoice: String(options.serverVoice ?? '').trim(),
+    serverModel: String(options.serverModel ?? '').trim() || SERVER_MODEL,
+    serverKey: String(options.serverKey ?? '').trim()
   }
 
   on('session.start', async ($, e, next) => {
@@ -620,7 +643,7 @@ export const register: Register = (on, options) => {
     const test = /^test(?:\s+([\s\S]+))?$/i.exec(e.args.trim())
     if (test) {
       const named = (test[1] ?? '').trim().replace(/^(['"])(.*)\1$/, '$2').trim()
-      return { text: await testVoice($, named || settings.voice) }
+      return { text: await testVoice($, named || settings.voice, named) }
     }
     if (arg === 'stop') {
       silence()
