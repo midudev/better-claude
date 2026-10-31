@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderNode, RenderViewport, Timer } from 'claude-code'
 
-import { LINUX, MACOS, MACOS_VOICES, QUEUE, SERVER, WINDOWS, WINDOWS_VOICES, dispatcherRate, espeakWords, powershell, serverVoiceFor } from './speaker'
+import { LINUX, MACOS, MACOS_VOICES, QUEUE, SERVER, SERVER_VOICES, WINDOWS, WINDOWS_VOICES, dispatcherRate, espeakWords, powershell, serverVoiceFor, serverVoicesIn } from './speaker'
 import { cut, finalQuestion, guessLanguage, parseNarration, plain, withQuestion } from './text'
 
 type Platform = 'macos' | 'windows' | 'linux' | 'other'
@@ -316,6 +316,22 @@ async function listVoices ($: EngineInterface) {
   if (!sections.length) return 'Narrator: no installed voices found.'
   if (failures.length) sections.push(`Some voices could not be listed: ${failures.join('; ')}`)
   return sections.join('\n\n')
+}
+
+/** The speech server's voices, where one is set and it lists them; else what came of asking. Empty: no server. */
+async function listServerVoices ($: EngineInterface) {
+  if (!settings.server || (await platformOf($)) === 'windows') return ''
+  let answer = ''
+  try {
+    const env = { NARRATOR_SERVER: settings.server, NARRATOR_SERVER_KEY: settings.serverKey }
+    for await (const { text } of $.process.spawn({ argv: ['sh', '-c', SERVER_VOICES, 'narrator-voices'], env })) answer += text
+  } catch (error) {
+    $.ui.log(`narrator: speech server voices: ${message(error)}`, { to: 'debug' })
+  }
+  const voices = serverVoicesIn(answer)
+  return voices.length
+    ? `Speech server voices (${settings.server}; set them in Speech server voice, try one with /narrator test <voice>):\n${voices.join(', ')}`
+    : `Speech server (${settings.server}): it lists no voices at /audio/voices; its documentation names them.`
 }
 
 /** Shows on the switch whether this session's narration is speaking, and how many wait behind it; while it does, sweeps it. */
@@ -635,11 +651,11 @@ export const register: Register = (on, options) => {
   on('command.run', { command: 'narrator' }, async ($, e) => {
     const arg = e.args.trim().toLowerCase()
     if (arg === 'voices') {
-      try {
-        return { text: await listVoices($) }
-      } catch (error) {
-        return { text: `Narrator: could not list voices. ${message(error)}` }
-      }
+      const [server, system] = await Promise.all([
+        listServerVoices($),
+        listVoices($).catch(error => `Narrator: could not list voices. ${message(error)}`)
+      ])
+      return { text: server ? `${server}\n\n${system}` : system }
     }
     const test = /^test(?:\s+([\s\S]+))?$/i.exec(e.args.trim())
     if (test) {

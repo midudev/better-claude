@@ -465,6 +465,26 @@ child=$!
 wait "$child" || { echo "error: $1 could not play the speech"; exit 1; }
 `
 
+/**
+ * The voices a speech server lists at NARRATOR_SERVER's `/audio/voices`, as JSON, where it has that
+ * route (Kokoro-FastAPI does; OpenAI's API does not). The key goes as SERVER's does.
+ */
+export const SERVER_VOICES = String.raw`
+{ if [ -n "$NARRATOR_SERVER_KEY" ]; then printf 'Authorization: Bearer %s\n' "$NARRATOR_SERVER_KEY"; fi; } |
+  curl -sSf -H @- --connect-timeout 3 --max-time 10 "$NARRATOR_SERVER/audio/voices"
+`
+
+/** The voice names in a server's `/audio/voices` answer: `{ voices: [...] }`, each a name or `{ id, name }`. */
+export function serverVoicesIn (answer: string) {
+  try {
+    const { voices } = JSON.parse(answer) as { voices?: unknown }
+    if (!Array.isArray(voices)) return []
+    return voices.map(voice => (typeof voice === 'string' ? voice : String((voice as { id?: unknown; name?: unknown })?.id ?? (voice as { name?: unknown })?.name ?? ''))).filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
 /** What a speech server is asked for when its voice setting names none. */
 export const SERVER_VOICE = 'alloy'
 

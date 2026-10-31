@@ -4,7 +4,7 @@ import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import { languageOf } from './register'
-import { serverVoiceFor } from './speaker'
+import { serverVoiceFor, serverVoicesIn } from './speaker'
 import { finalQuestion, guessLanguage, parseNarration, plain, withQuestion } from './text'
 
 const USAGE = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
@@ -22,6 +22,8 @@ type World = {
   speaker?: 'speaks' | 'talks on' | 'fails'
   /** Whether the speech server's speaker fails, so the next one speaks. */
   isServerDown?: boolean
+  /** What the speech server answers at /audio/voices (empty: it does not). */
+  serverVoices?: string
   /** How many narrations of other windows the speaker says wait their turn behind it. */
   waiting?: number
   hasEngineVoice?: boolean
@@ -33,7 +35,7 @@ type World = {
  * Everything beneath the mod: the session, the store, the system and its synthesizers, the model
  * that writes the narration, and the engine's own `$.audio.speak`.
  */
-function world (on: On, { system = 'Darwin', env = {}, reply = 'es\nHe añadido el narrador y los tests pasan.', tools = '', voices = '', table = '', processErrors = [], unknownVoices = [], speaker = 'speaks', isServerDown = false, waiting = 0, hasEngineVoice = true, recap = 'Estamos en `plugins/narrator/hooks/register.tsx` y los tests pasan.', store = {} }: World = {}) {
+function world (on: On, { system = 'Darwin', env = {}, reply = 'es\nHe añadido el narrador y los tests pasan.', tools = '', voices = '', table = '', processErrors = [], unknownVoices = [], speaker = 'speaks', isServerDown = false, serverVoices = '', waiting = 0, hasEngineVoice = true, recap = 'Estamos en `plugins/narrator/hooks/register.tsx` y los tests pasan.', store = {} }: World = {}) {
   const clock = mock.clock(on, { now: 0 })
   const kept: Record<string, unknown> = { ...store }
   on('store.get', ($, e) => ({ value: kept[e.key] }))
@@ -94,6 +96,10 @@ function world (on: On, { system = 'Darwin', env = {}, reply = 'es\nHe añadido 
   })
   // A speaker: it says which voice it speaks with, then `.` every tenth of a second while it talks.
   on('process.spawn', async function * ($, e) {
+    if (e.argv.includes('narrator-voices')) {
+      if (serverVoices) yield { stream: 'stdout' as const, text: serverVoices }
+      return { value: { code: serverVoices ? 0 : 22, signal: null } }
+    }
     const run: Spoken = { argv: [...e.argv], env: { ...e.env }, isEnded: false }
     spoken.push(run)
     try {
@@ -630,6 +636,24 @@ test('/narrator test sends a named voice to the speech server', { options: { ...
   expect(JSON.parse(w.spoken[0]!.env.NARRATOR_BODY!)).toMatchObject({ voice: 'shimmer', input: 'Hello! This is a voice preview for Narrator.' })
   expect((await narrator($, 'test')).text).toBe('Narrator: previewed Luisa.')
   expect(JSON.parse(w.spoken[1]!.env.NARRATOR_BODY!)).toMatchObject({ voice: 'nova' })
+})
+
+test('/narrator voices lists the speech server\'s voices before the system\'s', { options: SERVER_OPTIONS }, async ($, on) => {
+  world(on, { voices: 'Thomas\tfr-FR\n', serverVoices: '{"voices":[{"id":"ff_siwis","name":"ff_siwis"},{"id":"af_heart","name":"af_heart"}]}' })
+  await startSession($)
+  expect((await narrator($, 'voices')).text).toBe('Speech server voices (https://speech.example/v1; set them in Speech server voice, try one with /narrator test <voice>):\nff_siwis, af_heart\n\nInstalled voices:\nfr-FR: Thomas')
+})
+
+test('/narrator voices says so when the speech server does not list its voices', { options: SERVER_OPTIONS }, async ($, on) => {
+  world(on, { voices: 'Thomas\tfr-FR\n' })
+  await startSession($)
+  expect((await narrator($, 'voices')).text).toBe('Speech server (https://speech.example/v1): it lists no voices at /audio/voices; its documentation names them.\n\nInstalled voices:\nfr-FR: Thomas')
+})
+
+test('a server\'s voice list: names, or objects with an id or a name', () => {
+  expect(serverVoicesIn('{"voices":["nova",{"id":"ff_siwis"},{"name":"bf_emma"},{}]}')).toEqual(['nova', 'ff_siwis', 'bf_emma'])
+  expect(serverVoicesIn('not json')).toEqual([])
+  expect(serverVoicesIn('{"data":[]}')).toEqual([])
 })
 
 test('the speech server voice for a language: its own, else the one without a language, else English\'s, else the first', () => {
