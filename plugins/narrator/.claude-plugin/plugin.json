@@ -61,19 +61,19 @@
     "server": {
       "type": "string",
       "title": "Speech server",
-      "description": "The address of a speech server with OpenAI's speech API (Kokoro-FastAPI: http://localhost:8880/v1), to say each narration with, in place of the system's voice (macOS and Linux); the system's voice speaks when it does not answer. Empty: the system's voice.",
+      "description": "The address of any server with OpenAI's speech API, what comes before /audio/speech (https://api.openai.com/v1, or a local one as Kokoro-FastAPI's http://localhost:8880/v1), to say each narration with in place of the system's voice (macOS and Linux); the system's voice speaks when it does not answer. Empty: the system's voice.",
       "default": ""
     },
     "serverVoice": {
       "type": "string",
       "title": "Speech server voice",
-      "description": "The voice the speech server speaks with (af_heart), or one per language beside one for the others (af_heart, es:ef_dora, fr:ff_siwis). Empty: alloy.",
+      "description": "The voice the speech server speaks with (nova), or one per language beside one for the others (nova, es:ef_dora, fr:ff_siwis). Empty: alloy.",
       "default": ""
     },
     "serverModel": {
       "type": "string",
       "title": "Speech server model",
-      "description": "The model the speech server is asked for.",
+      "description": "The model the speech server is asked for (tts-1, gpt-4o-mini-tts, or the name your server gives its own).",
       "default": "tts-1"
     },
     "serverKey": {

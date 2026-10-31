@@ -201,9 +201,9 @@ const inLine = (command: Command): Command => ({ ...command, argv: ['sh', '-c', 
 
 /**
  * The programs that can say `text` here, best first; `ticket`, when it was ready, is its place in the
- * line. `serverVoice` is the voice a speech server is asked for.
+ * line. `serverVoice`, a voice named for the speech server, else the setting's for the language.
  */
-async function speakersFor ($: EngineInterface, text: string, language: string, voice: string, serverVoice: string, ticket: string): Promise<Command[]> {
+async function speakersFor ($: EngineInterface, text: string, language: string, voice: string, ticket: string, serverVoice = serverVoiceFor(settings.serverVoice, language)): Promise<Command[]> {
   const env = { NARRATOR_TEXT: text, NARRATOR_LANG: language, NARRATOR_VOICE: voice, NARRATOR_SPEED: String(settings.speed), NARRATOR_TICKET: ticket }
   const system = await platformOf($)
   // A speak command of the person's own, run by the shell with the narration as its last argument.
@@ -216,8 +216,7 @@ async function speakersFor ($: EngineInterface, text: string, language: string, 
   // A speech server first, the system's voices after it, should it not answer.
   const body = JSON.stringify({ model: settings.serverModel, input: text, voice: serverVoice, response_format: 'wav', speed: settings.speed })
   const speaker = `${serverVoice} (speech server)`
-  const serverEnv: Record<string, string> = { ...env, NARRATOR_SERVER: settings.server, NARRATOR_BODY: body, NARRATOR_SPEAKER: speaker }
-  if (settings.serverKey) serverEnv.NARRATOR_SERVER_KEY = settings.serverKey
+  const serverEnv = { ...env, NARRATOR_SERVER: settings.server, NARRATOR_BODY: body, NARRATOR_SPEAKER: speaker, NARRATOR_SERVER_KEY: settings.serverKey }
   return [inLine({ argv: ['sh', '-c', LINUX, 'narrator', 'sh', '-c', SERVER, 'narrator-server'], env: serverEnv, program: 'speech server' }), ...speakers]
 }
 
@@ -378,10 +377,10 @@ async function play ($: EngineInterface, narration: Narration, command: Command)
 }
 
 /** Says `text` with the best speaker that works here, the engine's own synthesizer last; how, if it did. */
-async function speak ($: EngineInterface, narration: Narration, text: string, language: string, voice = settings.voice, serverVoice = serverVoiceFor(settings.serverVoice, language)): Promise<Spoke | undefined> {
+async function speak ($: EngineInterface, narration: Narration, text: string, language: string, voice = settings.voice, serverVoice?: string): Promise<Spoke | undefined> {
   // Every window shares one line, so two sessions that finish together are said one after the other.
   const ticket = String(await $.clock.now()).padStart(13, '0')
-  for (const command of await speakersFor($, text, language, voice, serverVoice, ticket)) {
+  for (const command of await speakersFor($, text, language, voice, ticket, serverVoice)) {
     const spoke = await play($, narration, command)
     if (spoke || !narration.isActive) return spoke
   }
@@ -400,8 +399,10 @@ async function speak ($: EngineInterface, narration: Narration, text: string, la
   }
 }
 
-/** Says a short sample with `voice` (empty: the one picked for English), and what came of it. */
-/** `named`, a voice the person named, is also the one the speech server is asked for, where there is one. */
+/**
+ * Says a short sample with `voice` (empty: the one picked for English), and what came of it. `named`,
+ * a voice the person named, is also the one a speech server is asked for.
+ */
 async function testVoice ($: EngineInterface, voice: string, named = '') {
   silence()
   const narration: Narration = { isActive: true, abort: new AbortController() }
@@ -602,8 +603,8 @@ export const register: Register = (on, options) => {
     shortAnswer: shortAnswer >= 0 ? shortAnswer : SHORT_ANSWER,
     language: languageOf(options.language),
     command: String(options.command ?? '').trim(),
-    // Kokoro-FastAPI's `http://localhost:8880/v1`: what comes before `/audio/speech`.
-    server: String(options.server ?? '').trim().replace(/\/+$/, ''),
+    // What comes before `/audio/speech` (`https://api.openai.com/v1`); a whole endpoint is taken too.
+    server: String(options.server ?? '').trim().replace(/\/+$/, '').replace(/\/audio\/speech$/, ''),
     serverVoice: String(options.serverVoice ?? '').trim(),
     serverModel: String(options.serverModel ?? '').trim() || SERVER_MODEL,
     serverKey: String(options.serverKey ?? '').trim()

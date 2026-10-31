@@ -422,8 +422,8 @@ leave
 
 /**
  * A speech server's speaker, run by LINUX on macOS and Linux: it posts NARRATOR_BODY, an OpenAI
- * speech request, to NARRATOR_SERVER's `/audio/speech` (Kokoro-FastAPI, OpenAI, any server that
- * speaks that API), then plays the WAV that comes back with the system's player. NARRATOR_SERVER_KEY,
+ * speech request, to NARRATOR_SERVER's `/audio/speech` (OpenAI's, or any server that speaks that
+ * API, as Kokoro-FastAPI), then plays the WAV that comes back with the system's player. NARRATOR_SERVER_KEY,
  * when set, goes to curl as its Authorization header on its standard input, never on a command line
  * others can read. Ended, it ends curl or the player, and leaves no file behind; a server that does
  * not answer with audio, or no player to play it, is an `error` line and an exit code other than 0,
@@ -441,9 +441,8 @@ end () {
 }
 trap 'rm -rf "$dir"' EXIT
 trap end TERM INT HUP PIPE
-printf '%s' "$NARRATOR_BODY" > "$dir/body.json"
-{ if [ -n "$NARRATOR_SERVER_KEY" ]; then printf 'header = "Authorization: Bearer %s"\n' "$NARRATOR_SERVER_KEY"; fi; } |
-  curl -sS -K - --max-time 60 -H 'Content-Type: application/json' --data-binary @"$dir/body.json" \
+{ if [ -n "$NARRATOR_SERVER_KEY" ]; then printf 'Authorization: Bearer %s\n' "$NARRATOR_SERVER_KEY"; fi; } |
+  curl -sS -H @- -H 'Content-Type: application/json' --connect-timeout 5 --max-time 60 --data-binary "$NARRATOR_BODY" \
     -o "$dir/speech.wav" -w '%{http_code}' "$NARRATOR_SERVER/audio/speech" > "$dir/status" 2> "$dir/error" &
 child=$!
 wait "$child"
@@ -470,8 +469,8 @@ wait "$child" || { echo "error: $1 could not play the speech"; exit 1; }
 export const SERVER_VOICE = 'alloy'
 
 /**
- * The speech server's voice for a language, from its setting: one voice (`af_heart`), or one per
- * language, as `es:ef_dora`, beside one without a language for the others (`af_heart, es:ef_dora`).
+ * The speech server's voice for a language, from its setting: one voice (`nova`), or one per
+ * language, as `es:ef_dora`, beside one without a language for the others (`nova, es:ef_dora`).
  * The language's own, else the one without a language, else English's, else the first.
  */
 export function serverVoiceFor (setting: string, language: string) {
@@ -480,5 +479,5 @@ export function serverVoiceFor (setting: string, language: string) {
     return at < 0 ? { language: '', voice: entry } : { language: entry.slice(0, at).trim().toLowerCase(), voice: entry.slice(at + 1).trim() }
   }).filter(entry => entry.voice)
   const of = (code: string) => entries.find(entry => entry.language === code)?.voice
-  return (language ? of(language) : undefined) ?? of('') ?? of('en') ?? entries[0]?.voice ?? SERVER_VOICE
+  return of(language) ?? of('') ?? of('en') ?? entries[0]?.voice ?? SERVER_VOICE
 }

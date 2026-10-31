@@ -535,7 +535,7 @@ test('on Windows a speak command is left aside: the system voice speaks', { opti
   expect(w.spoken[0]!.env.NARRATOR_SPEAKER).toBeUndefined()
 })
 
-const SERVER_OPTIONS = { server: 'http://localhost:8880/v1/' }
+const SERVER_OPTIONS = { server: 'https://speech.example/v1/' }
 
 test('a speech server says the narration, in the line, before the system voice', { options: SERVER_OPTIONS }, async ($, on) => {
   const w = world(on, { store: { enabled: true } })
@@ -550,23 +550,33 @@ test('a speech server says the narration, in the line, before the system voice',
   expect(wrapper).toContain('NARRATOR_SPEAKER')
   expect(rest).toEqual(['sh', '-c', expect.stringContaining('/audio/speech'), 'narrator-server'])
   const { env } = w.spoken[0]!
-  expect(env).toMatchObject({ NARRATOR_SERVER: 'http://localhost:8880/v1', NARRATOR_SPEAKER: 'alloy (speech server)', NARRATOR_TEXT: 'He añadido el narrador y los tests pasan.' })
+  expect(env).toMatchObject({ NARRATOR_SERVER: 'https://speech.example/v1', NARRATOR_SPEAKER: 'alloy (speech server)', NARRATOR_TEXT: 'He añadido el narrador y los tests pasan.' })
   expect(JSON.parse(env.NARRATOR_BODY!)).toEqual({ model: 'tts-1', input: 'He añadido el narrador y los tests pasan.', voice: 'alloy', response_format: 'wav', speed: 1.3 })
-  expect(env.NARRATOR_SERVER_KEY).toBeUndefined()
+  expect(env.NARRATOR_SERVER_KEY).toBe('')
 })
 
-test('the speech server voice can be one per language, and the model and key reach it', { options: { ...SERVER_OPTIONS, serverVoice: 'af_heart, es:ef_dora', serverModel: 'kokoro', serverKey: 'sk-secret' } }, async ($, on) => {
+test('the speech server voice can be one per language, and the model and key reach it', { options: { ...SERVER_OPTIONS, serverVoice: 'nova, es:ef_dora', serverModel: 'my-model', serverKey: 'sk-secret' } }, async ($, on) => {
   const w = world(on, { store: { enabled: true } })
   await startSession($)
   const speech = w.nextSpeech()
   await turn($)
   await speech
   const { env, argv } = w.spoken[0]!
-  expect(JSON.parse(env.NARRATOR_BODY!)).toMatchObject({ model: 'kokoro', voice: 'ef_dora' })
+  expect(JSON.parse(env.NARRATOR_BODY!)).toMatchObject({ model: 'my-model', voice: 'ef_dora' })
   expect(env.NARRATOR_SPEAKER).toBe('ef_dora (speech server)')
   // The key travels in the environment, never in a command line other users can read.
   expect(env.NARRATOR_SERVER_KEY).toBe('sk-secret')
   expect(argv.join(' ')).not.toContain('sk-secret')
+})
+
+test('any server and model: a whole endpoint is taken as its address', { options: { server: 'http://127.0.0.1:9000/v1/audio/speech', serverModel: 'gpt-4o-mini-tts' } }, async ($, on) => {
+  const w = world(on, { store: { enabled: true } })
+  await startSession($)
+  const speech = w.nextSpeech()
+  await turn($)
+  await speech
+  expect(w.spoken[0]!.env.NARRATOR_SERVER).toBe('http://127.0.0.1:9000/v1')
+  expect(JSON.parse(w.spoken[0]!.env.NARRATOR_BODY!)).toMatchObject({ model: 'gpt-4o-mini-tts', voice: 'alloy' })
 })
 
 test('when the speech server fails, the system voice says the narration', { options: SERVER_OPTIONS }, async ($, on) => {
@@ -589,7 +599,7 @@ test('a speech server works on Linux too, with its synthesizer after it', { opti
   await turn($)
   await speech
   await w.settled()
-  expect(w.spoken.map(run => run.env.NARRATOR_SERVER ?? behindLine(run)[4])).toEqual(['http://localhost:8880/v1', 'espeak-ng'])
+  expect(w.spoken.map(run => run.env.NARRATOR_SERVER ?? behindLine(run)[4])).toEqual(['https://speech.example/v1', 'espeak-ng'])
 })
 
 test('on Windows the speech server is left aside: the system voice speaks', { options: SERVER_OPTIONS }, async ($, on) => {
@@ -613,13 +623,13 @@ test('a speak command of your own comes before the speech server', { options: { 
   expect(w.spoken[0]!.env.NARRATOR_SERVER).toBeUndefined()
 })
 
-test('/narrator test sends a named voice to the speech server', { options: { ...SERVER_OPTIONS, serverVoice: 'af_heart' } }, async ($, on) => {
+test('/narrator test sends a named voice to the speech server', { options: { ...SERVER_OPTIONS, serverVoice: 'nova' } }, async ($, on) => {
   const w = world(on)
   await startSession($)
-  expect((await narrator($, 'test bf_emma')).text).toBe('Narrator: previewed bf_emma.')
-  expect(JSON.parse(w.spoken[0]!.env.NARRATOR_BODY!)).toMatchObject({ voice: 'bf_emma', input: 'Hello! This is a voice preview for Narrator.' })
+  expect((await narrator($, 'test shimmer')).text).toBe('Narrator: previewed shimmer.')
+  expect(JSON.parse(w.spoken[0]!.env.NARRATOR_BODY!)).toMatchObject({ voice: 'shimmer', input: 'Hello! This is a voice preview for Narrator.' })
   expect((await narrator($, 'test')).text).toBe('Narrator: previewed Luisa.')
-  expect(JSON.parse(w.spoken[1]!.env.NARRATOR_BODY!)).toMatchObject({ voice: 'af_heart' })
+  expect(JSON.parse(w.spoken[1]!.env.NARRATOR_BODY!)).toMatchObject({ voice: 'nova' })
 })
 
 test('the speech server voice for a language: its own, else the one without a language, else English\'s, else the first', () => {
