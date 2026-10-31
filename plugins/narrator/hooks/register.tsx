@@ -318,6 +318,24 @@ async function listVoices ($: EngineInterface) {
   return sections.join('\n\n')
 }
 
+/**
+ * Why a speech server is not to be used, if it is not: a key would go to it in the clear, over http
+ * to another machine (RFC 6750 asks TLS of a bearer token). Over https, or to this machine by its
+ * loopback name or address (`localhost`, `127.x.x.x`, `[::1]`), it may. The URL is parsed, not
+ * matched as text, so `http://localhost@elsewhere` is elsewhere.
+ */
+export function serverRefusal (server: string, key: string) {
+  if (!server || !key) return ''
+  let url: URL
+  try {
+    url = new URL(server)
+  } catch {
+    return ''
+  }
+  const isLoopback = url.hostname === 'localhost' || /^127(?:\.\d{1,3}){3}$/.test(url.hostname) || url.hostname === '[::1]'
+  return url.protocol === 'http:' && !isLoopback ? `Narrator: the speech server key is not sent over plain http to ${url.hostname}; use https. The system's voice speaks meanwhile.` : ''
+}
+
 /** The speech server's voices, where one is set and it lists them; else what came of asking. Empty: no server. */
 async function listServerVoices ($: EngineInterface) {
   if (!settings.server || (await platformOf($)) === 'windows') return ''
@@ -625,11 +643,15 @@ export const register: Register = (on, options) => {
     serverModel: String(options.serverModel ?? '').trim() || SERVER_MODEL,
     serverKey: String(options.serverKey ?? '').trim()
   }
+  // A key never goes in the clear to another machine: the server is left aside, and the session told.
+  const refusal = serverRefusal(settings.server, settings.serverKey)
+  if (refusal) settings.server = ''
 
   on('session.start', async ($, e, next) => {
     // A session nobody is at (`claude -p`: a script, a bot that runs Claude Code) is not narrated.
     isInteractive = e.isInteractive
     const asked = String(options.language ?? '').trim()
+    if (refusal && isInteractive) $.ui.toast(refusal)
     if (asked && !settings.language) $.ui.log(`narrator: "${cut(asked, 40)}" is not a language code (es, en, pt...): speaking the language you write in`, { to: 'debug' })
     await $.command.register({
       name: 'narrator',

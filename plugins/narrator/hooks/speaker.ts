@@ -441,15 +441,18 @@ end () {
 }
 trap 'rm -rf "$dir"' EXIT
 trap end TERM INT HUP PIPE
+# The narration goes in a file, by a builtin: on no command line others can read.
+printf '%s' "$NARRATOR_BODY" > "$dir/body.json"
 { if [ -n "$NARRATOR_SERVER_KEY" ]; then printf 'Authorization: Bearer %s\n' "$NARRATOR_SERVER_KEY"; fi; } |
-  curl -sS -H @- -H 'Content-Type: application/json' --connect-timeout 5 --max-time 60 --data-binary "$NARRATOR_BODY" \
+  curl -sS -H @- -H 'Content-Type: application/json' --connect-timeout 5 --max-time 60 --data-binary @"$dir/body.json" \
     -o "$dir/speech.wav" -w '%{http_code}' "$NARRATOR_SERVER/audio/speech" > "$dir/status" 2> "$dir/error" &
 child=$!
 wait "$child"
+fetched=$?
 child=
 status=$(cat "$dir/status" 2>/dev/null)
 case $status in
-  2??) ;;
+  2??) if [ "$fetched" -ne 0 ]; then echo "error: the speech did not arrive whole: $(head -c 200 "$dir/error" | tr '\n' ' ')"; exit 1; fi ;;
   000 | '') echo "error: the speech server did not answer: $(head -c 200 "$dir/error" | tr '\n' ' ')"; exit 1 ;;
   *) echo "error: the speech server answered $status: $(head -c 200 "$dir/speech.wav" | tr '\n' ' ')"; exit 1 ;;
 esac

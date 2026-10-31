@@ -3,7 +3,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { languageOf } from './register'
+import { languageOf, serverRefusal } from './register'
 import { serverVoiceFor, serverVoicesIn } from './speaker'
 import { finalQuestion, guessLanguage, parseNarration, plain, withQuestion } from './text'
 
@@ -654,6 +654,31 @@ test('a server\'s voice list: names, or objects with an id or a name', () => {
   expect(serverVoicesIn('{"voices":["nova",{"id":"ff_siwis"},{"name":"bf_emma"},{}]}')).toEqual(['nova', 'ff_siwis', 'bf_emma'])
   expect(serverVoicesIn('not json')).toEqual([])
   expect(serverVoicesIn('{"data":[]}')).toEqual([])
+})
+
+test('a key is never sent over plain http to another machine: the system voice speaks, and the session is told', { options: { server: 'http://speech.example/v1', serverKey: 'sk-secret' } }, async ($, on) => {
+  const w = world(on, { store: { enabled: true } })
+  await startSession($)
+  const speech = w.nextSpeech()
+  await turn($)
+  await speech
+  expect(w.spoken).toHaveLength(1)
+  expect(w.spoken[0]!.env.NARRATOR_SERVER).toBeUndefined()
+  expect(w.toasts).toEqual([expect.stringContaining('not sent over plain http to speech.example')])
+})
+
+test('a key goes over https, or over http to this machine', () => {
+  expect(serverRefusal('http://speech.example/v1', 'k')).not.toBe('')
+  expect(serverRefusal('http://192.168.1.20:8880/v1', 'k')).not.toBe('')
+  expect(serverRefusal('https://api.openai.com/v1', 'k')).toBe('')
+  expect(serverRefusal('http://localhost:8880/v1', 'k')).toBe('')
+  expect(serverRefusal('http://127.0.0.1:8880/v1', 'k')).toBe('')
+  expect(serverRefusal('http://[::1]:8880/v1', 'k')).toBe('')
+  expect(serverRefusal('http://speech.example/v1', '')).toBe('')
+  // Names that only look like this machine's.
+  expect(serverRefusal('http://127.evil.example/v1', 'k')).not.toBe('')
+  expect(serverRefusal('http://localhost:80@evil.example/v1', 'k')).not.toBe('')
+  expect(serverRefusal('http://localhost.evil.example/v1', 'k')).not.toBe('')
 })
 
 test('the speech server voice for a language: its own, else the one without a language, else English\'s, else the first', () => {
