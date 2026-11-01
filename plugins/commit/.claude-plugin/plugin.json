@@ -1,7 +1,7 @@
 {
   "name": "commit",
-  "version": "0.3.0",
-  "description": "/commit asks whether to commit and push, only commit, or commit on a new branch, then splits your changes into Conventional Commits, one per logical group, on the branch you are on. Runs on Haiku 5.5.",
+  "version": "0.4.0",
+  "description": "/commit asks whether to commit and push, only commit, or commit on a new branch, and whether to add a Co-Authored-By trailer, then splits your changes into Conventional Commits, one per logical group, on the branch you are on. Runs on Haiku 5.5.",
   "author": {
     "name": "Miguel Ángel Durán (midudev)",
     "url": "https://github.com/midudev"

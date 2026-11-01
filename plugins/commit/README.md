@@ -9,6 +9,10 @@ A Claude Code command: `/commit` asks what to do, then splits your changes into 
   ❯ 1. Commit + push (Recommended)
     2. Commit only
     3. Commit on a new branch
+
+  Co-author: add a Co-Authored-By trailer?
+  ❯ 1. No (Recommended)
+    2. Yes
 ```
 
 | Choice | What it does |
@@ -20,9 +24,9 @@ A Claude Code command: `/commit` asks what to do, then splits your changes into 
 - Reads the branch, `git status` and `git diff HEAD` before Claude starts (the staged diff in a repo with no commits yet, where `HEAD` does not exist).
 - Never creates or switches branches unless you pick **Commit on a new branch**.
 - Stages only each group's files (unstaging with `git reset` first if other files are already staged), never `.env*` or secrets, and commits as `type(scope): summary`: in the configured language (English by default), imperative, under 72 characters, with a body only when the why is not obvious.
-- Never adds `Co-Authored-By`, Claude Code session links (`Claude-Session`) or any Claude or Anthropic attribution.
+- Asks whether to end the commits with a `Co-Authored-By` trailer (**No** by default). It uses the trailer line Claude Code gives for commits, or `Co-Authored-By: Claude <noreply@anthropic.com>` when there is none. Whatever you pick, it never adds "Generated with Claude", Claude Code session links (`Claude-Session`) or any other Claude or Anthropic attribution.
 - Pushes with `git push -u origin HEAD`. With no remote, or a failed push, it reports the error and stops.
-- Runs `git` and asks its one question, nothing else (`allowed-tools: Bash(git *), AskUserQuestion`). Where it cannot ask, as in `claude -p "/commit"`, it commits and pushes.
+- Runs `git` and asks its questions, nothing else (`allowed-tools: Bash(git *), AskUserQuestion`). Where it cannot ask, as in `claude -p "/commit"`, it commits and pushes, adding no `Co-Authored-By`.
 
 ## Install
 
