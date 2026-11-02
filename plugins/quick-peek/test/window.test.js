@@ -9,6 +9,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { excerptOf, languageOf } from '../hooks/code.ts'
 import { WINDOWS, WINDOWS_BUILD, WINDOWS_TYPES } from '../hooks/window.ts'
 
 const skip = process.platform !== 'win32' && 'the window is Windows\''
@@ -112,6 +113,18 @@ test('told no exe to keep, compiles the window in memory and lays out a file', {
   const file = join(folder, 'memory.bin')
   writeFileSync(file, 'x'.repeat(2048))
   const { said, status } = run({ QUICK_PEEK_FILE: file, QUICK_PEEK_ASSEMBLY: undefined })
+  assert.equal(status, 0, said)
+  assert.match(said, DRY)
+})
+
+test('compiles the window where its environment would pass the 64 KB .NET starts a program with: many tokens\' lines, a long PATH', { skip }, () => {
+  // A file of JSON whose lines are `0,1,2,…`: 12 of them, as many as the mod tells, some 27,000 characters.
+  const text = Array.from({ length: 30 }, () => Array.from({ length: 120 }, (_, i) => i % 10).join(',')).join('\n')
+  const file = join(folder, 'numbers.json')
+  writeFileSync(file, text)
+  const { source, ...shown } = excerptOf(text, languageOf(file), 10, 12)
+  // Compiled anew, in a folder of its own that is not there yet.
+  const { said, status } = run({ QUICK_PEEK_FILE: file, QUICK_PEEK_CODE: JSON.stringify(shown), QUICK_PEEK_ASSEMBLY: join(folder, 'large', WINDOWS_BUILD), LONG_PATH: 'x'.repeat(15_000) })
   assert.equal(status, 0, said)
   assert.match(said, DRY)
 })

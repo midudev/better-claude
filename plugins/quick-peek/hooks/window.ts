@@ -695,17 +695,23 @@ $ProgressPreference = 'SilentlyContinue'
 try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
 try {
   Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+  # The compiler starts with this environment, and .NET starts none over 64 KB: the C# and the
+  # lines are taken out of it, and the lines, which the window reads, put back once it is compiled.
+  $types = $env:QUICK_PEEK_TYPES
+  $code = $env:QUICK_PEEK_CODE
+  $env:QUICK_PEEK_TYPES = $null
+  $env:QUICK_PEEK_CODE = $null
   $assembly = $env:QUICK_PEEK_ASSEMBLY
   if (-not $assembly) {
     # No folder of the user's own to keep it in: compiled in memory, for this window only.
-    Add-Type -ReferencedAssemblies System.Windows.Forms, System.Drawing, System.Web.Extensions -TypeDefinition $env:QUICK_PEEK_TYPES
+    Add-Type -ReferencedAssemblies System.Windows.Forms, System.Drawing, System.Web.Extensions -TypeDefinition $types
   } else {
     if (-not (Test-Path -LiteralPath $assembly)) {
       $null = New-Item -ItemType Directory -Force -Path (Split-Path -Parent $assembly)
       # Compiled aside, then moved in: another preview compiling it at the same time finds it whole.
       $building = $assembly -replace '\.exe$', "-$PID.exe"
       try {
-        Add-Type -OutputAssembly $building -OutputType WindowsApplication -ReferencedAssemblies System.Windows.Forms, System.Drawing, System.Web.Extensions -TypeDefinition $env:QUICK_PEEK_TYPES
+        Add-Type -OutputAssembly $building -OutputType WindowsApplication -ReferencedAssemblies System.Windows.Forms, System.Drawing, System.Web.Extensions -TypeDefinition $types
         Move-Item -LiteralPath $building -Destination $assembly
       } catch {
         if (-not (Test-Path -LiteralPath $assembly)) { throw }
@@ -715,6 +721,7 @@ try {
     }
     $null = [Reflection.Assembly]::LoadFrom($assembly)
   }
+  $env:QUICK_PEEK_CODE = $code
   # A path it cannot take (too long, a character Windows refuses) is this path's, as one not there.
   try { $path = [IO.Path]::GetFullPath($env:QUICK_PEEK_FILE) } catch { [Console]::Out.WriteLine('skip: ' + $_.Exception.Message); exit 0 }
   if (-not (Test-Path -LiteralPath $path)) { [Console]::Out.WriteLine('skip: not there'); exit 0 }

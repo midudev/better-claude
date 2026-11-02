@@ -50,6 +50,9 @@ const FAILURES = 3
 // columns a card shows.
 const CODE_BYTES = 1024 * 1024
 const WINDOW_LINES = 20
+// The most characters the window's lines may take as QUICK_PEEK_CODE: Windows holds 32,767 in a
+// variable, its name and `=` among them.
+const CODE_CHARS = 32_000
 const CARD_LINES = 8
 const CARD_COLUMNS = 100
 
@@ -116,6 +119,22 @@ async function excerptAt ($: Engine, path: string, stat: FsStat, line: number | 
   if (excerpts.size >= PLANS) excerpts.delete(excerpts.keys().next().value!)
   excerpts.set(key, excerpt)
   return excerpt
+}
+
+/**
+ * The lines the window shows of the file at `path`, as QUICK_PEEK_CODE tells them: `WINDOW_LINES`,
+ * or fewer around `line` where their tokens make them longer than `CODE_CHARS`. One line always
+ * fits (it is cut at 240 characters); undefined for a file that is no code nor text.
+ */
+async function codeOf ($: Engine, path: string, stat: FsStat, line: number | undefined) {
+  for (let rows = WINDOW_LINES; rows > 0; rows--) {
+    const code = await excerptAt($, path, stat, line, rows)
+    if (!code) return undefined
+    const { source, ...shown } = code
+    const json = JSON.stringify(shown)
+    if (json.length <= CODE_CHARS) return json
+  }
+  return undefined
 }
 
 /** A run cut where it names a path, each path a run of its own carrying the target it links to. */
@@ -383,12 +402,9 @@ async function openWindow ($: Engine, path: string, line: number | undefined) {
   }
   const env: Record<string, string> = { QUICK_PEEK_FILE: path, QUICK_PEEK_SIZE: String(WINDOW_SIZE), QUICK_PEEK_LIFE: String(WINDOW_LIFE), QUICK_PEEK_HINT: WINDOW_HINT[system] }
   const stat = await statOf($, path)
-  const code = stat && (await excerptAt($, path, stat, line, WINDOW_LINES))
+  const code = stat && (await codeOf($, path, stat, line))
   if (!opening.isOpen) return
-  if (code) {
-    const { source, ...shown } = code
-    env.QUICK_PEEK_CODE = JSON.stringify(shown)
-  }
+  if (code) env.QUICK_PEEK_CODE = code
   let argv = ['osascript', '-l', 'JavaScript', '-e', MACOS]
   let isDirect = false
   if (system === 'windows') {

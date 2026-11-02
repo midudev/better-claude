@@ -14,6 +14,10 @@ const README = '/project/app/README.md'
 const SOURCE = '/project/app/src/app.ts'
 const PDF = '/Users/ana/docs/cv.pdf'
 const CODE = ['import { run } from \'./run\'', '', '// Starts it', 'export async function start (port: number) {', '  const server = await run(port)', '  return server', '}', ''].join('\n')
+// A file of JSON whose lines are 239 characters of `0,1,2,…`: each 2 characters a token, ~19 in
+// QUICK_PEEK_CODE, so 20 of them would take some 45,000.
+const NUMBERS = '/project/app/numbers.json'
+const NUMBERS_TEXT = Array.from({ length: 30 }, () => Array.from({ length: 120 }, (_, i) => i % 10).join(',')).join('\n')
 // The engine hands a hook the path as the host writes it: on a Windows host, `/a/b` is `C:\a\b`.
 const posix = (path: string) => path.replace(/^[A-Za-z]:/, '').replaceAll('\\', '/')
 const SCREEN = { columns: 60, rows: 40, isFullscreen: true }
@@ -25,7 +29,7 @@ const SCREEN = { columns: 60, rows: 40, isFullscreen: true }
 function world (on: On, { system = 'Darwin', env = {}, cwd = '/project/app', program = 'shows', isCompiled = false, existsMs = 0 }: { system?: string; env?: Record<string, string>; cwd?: string; program?: 'shows' | 'fails' | 'crashes once' | 'exe blocked' | 'skips once' | 'osascript fails'; isCompiled?: boolean; existsMs?: number } = {}) {
   const clock = mock.clock(on, { now: 0 })
   mock.env(on, { HOME: '/Users/ana', ...env })
-  const there: Record<string, 'file' | 'dir'> = { [VIDEO]: 'file', [FOLDER]: 'dir', [README]: 'file', [SOURCE]: 'file', [PDF]: 'file' }
+  const there: Record<string, 'file' | 'dir'> = { [VIDEO]: 'file', [FOLDER]: 'dir', [README]: 'file', [SOURCE]: 'file', [PDF]: 'file', [NUMBERS]: 'file' }
   // On Windows, whether the window was compiled already: its exe in the user's folder.
   // Looking for it takes `existsMs`: a slow disk.
   on('fs.exists', async ($, e) => {
@@ -47,9 +51,9 @@ function world (on: On, { system = 'Darwin', env = {}, cwd = '/project/app', pro
     const path = posix(e.path)
     const kind = there[path]
     if (!kind) return { deny: `ENOENT: ${e.path}` }
-    return { value: { kind, size: path === SOURCE ? CODE.length : 12 * 1024 * 1024, mtimeMs: 0, isLink: false } }
+    return { value: { kind, size: path === SOURCE ? CODE.length : path === NUMBERS ? NUMBERS_TEXT.length : 12 * 1024 * 1024, mtimeMs: 0, isLink: false } }
   })
-  on('fs.read', ($, e) => (posix(e.path) === SOURCE ? { value: CODE } : { deny: `ENOENT: ${e.path}` }))
+  on('fs.read', ($, e) => (posix(e.path) === SOURCE ? { value: CODE } : posix(e.path) === NUMBERS ? { value: NUMBERS_TEXT } : { deny: `ENOENT: ${e.path}` }))
   // The window's program: it says `shown`, then `.` every tenth of a second till it is ended; or,
   // where the system lets it show none, an error, and it ends.
   const windows: { argv: string[]; env: Record<string, string>; isEnded: boolean }[] = []
@@ -500,6 +504,22 @@ test('on Windows the window\'s command line, and the C# in QUICK_PEEK_TYPES, fit
   // A variable is held as NAME=value.
   expect(`QUICK_PEEK_TYPES=${env.QUICK_PEEK_TYPES}`.length).toBeLessThan(WINDOWS_LIMIT)
   for (const [name, value] of Object.entries(env)) expect(`${name}=${value}`.length).toBeLessThan(WINDOWS_LIMIT)
+})
+
+test('on Windows the lines of a file of many tokens fit the variable Windows holds: fewer of them, around the line named', async ($, on) => {
+  const w = world(on, WINDOWS_HOST)
+  await startSession($)
+  const ui = await reply($, 'Los datos están en `numbers.json:10`.')
+  await ui.pointer({ type: 'enter', x: 0, y: 0, in: 'path:0:0' })
+  await w.clock.advance(300)
+  const code = w.windows[0]!.env.QUICK_PEEK_CODE!
+  expect(`QUICK_PEEK_CODE=${code}`.length).toBeLessThan(WINDOWS_LIMIT)
+  const shown = JSON.parse(code) as { first: number; mark: number; lines: unknown[] }
+  expect(shown.lines.length).toBeGreaterThan(0)
+  expect(shown.lines.length).toBeLessThan(20)
+  expect(shown.mark).toBe(10)
+  expect(shown.first).toBeLessThanOrEqual(10)
+  expect(shown.first + shown.lines.length - 1).toBeGreaterThanOrEqual(10)
 })
 
 test('on Windows, with "Preview in a window" off, the terminal shows the cards', cards, async ($, on) => {
