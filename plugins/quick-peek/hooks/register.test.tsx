@@ -26,7 +26,7 @@ function world (on: On, { system = 'Darwin', env = {}, cwd = '/project/app', pro
   const clock = mock.clock(on, { now: 0 })
   mock.env(on, { HOME: '/Users/ana', ...env })
   const there: Record<string, 'file' | 'dir'> = { [VIDEO]: 'file', [FOLDER]: 'dir', [README]: 'file', [SOURCE]: 'file', [PDF]: 'file' }
-  // On Windows, whether the window was compiled already: its exe in the temp folder.
+  // On Windows, whether the window was compiled already: its exe in the user's folder.
   // Looking for it takes `existsMs`: a slow disk.
   on('fs.exists', async ($, e) => {
     if (existsMs) await clock.sleep(existsMs)
@@ -61,7 +61,7 @@ function world (on: On, { system = 'Darwin', env = {}, cwd = '/project/app', pro
         yield { stream: 'stdout' as const, text: 'error: Cannot add type. Compilation is not allowed here.\n' }
         return { value: { code: 1, signal: null } }
       }
-      // An exe the system will not start from the temp folder.
+      // An exe the system will not start (AppLocker).
       if (program === 'exe blocked' && e.argv[0]!.endsWith(WINDOWS_BUILD)) {
         yield { stream: 'stderr' as const, text: 'This program is blocked by group policy.\n' }
         return { value: { code: 1, signal: null } }
@@ -368,9 +368,9 @@ test('under WSL a click selects the path in Explorer', async ($, on) => {
 // A Windows session: `OS` says so and no `uname` answers. Its folders are written `/…` here: on a
 // Linux host the engine reads `C:/…` as a relative path and hands the hook another one, so how a
 // path keeps its drive is tested where no engine stands between, in `resolve`'s test.
-const WINDOWS_HOST = { system: '', cwd: '/project/app', env: { OS: 'Windows_NT', HOME: '/Users/ana', TEMP: 'C:\\Users\\ana\\AppData\\Local\\Temp' } }
-// The compiled window, where the mod looks for it.
-const EXE = `C:\\Users\\ana\\AppData\\Local\\Temp\\${WINDOWS_BUILD}`
+const WINDOWS_HOST = { system: '', cwd: '/project/app', env: { OS: 'Windows_NT', HOME: '/Users/ana', LOCALAPPDATA: 'C:\\Users\\ana\\AppData\\Local', TEMP: 'C:\\Users\\ana\\AppData\\Local\\Temp' } }
+// The compiled window, where the mod looks for it: a folder of the user's own.
+const EXE = `C:\\Users\\ana\\AppData\\Local\\quick-peek\\${WINDOWS_BUILD}`
 // PowerShell, where Windows keeps it: started by its full path, never by its name.
 const POWERSHELL = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'
 // The longest command line Windows starts, and the longest variable it holds, in characters.
@@ -437,6 +437,24 @@ test('on Windows a path the pointer left while the mod looked for the exe starts
   await w.clock.advance(400)
   expect(w.windows.map(opened => opened.env.QUICK_PEEK_FILE)).toEqual([README])
   expect(w.windows[0]!.isEnded).toBe(false)
+})
+
+test('on Windows with no folder of the user\'s own (no LOCALAPPDATA) no exe is kept or run: PowerShell compiles the window in memory', async ($, on) => {
+  const { LOCALAPPDATA, ...env } = WINDOWS_HOST.env
+  const w = world(on, { ...WINDOWS_HOST, env, isCompiled: true })
+  await startSession($)
+  const ui = await reply($, `Listo: ${VIDEO}`)
+  for (let i = 0; i < 2; i++) {
+    await ui.pointer({ type: 'enter', x: 0, y: 0, in: 'path:0:0' })
+    await w.clock.advance(300)
+    await ui.pointer({ type: 'leave', x: 3, y: 0, in: 'path:0:0' })
+    await w.clock.advance(300)
+  }
+  expect(w.windows.map(opened => opened.argv[0])).toEqual([POWERSHELL, POWERSHELL])
+  for (const opened of w.windows) {
+    expect(opened.env.QUICK_PEEK_ASSEMBLY).toBeUndefined()
+    expect(opened.env.QUICK_PEEK_TYPES).toBe(WINDOWS_TYPES)
+  }
 })
 
 test('on Windows a path the window cannot show (too long) is skipped: no PowerShell, no cards, and the next hover opens the window', async ($, on) => {

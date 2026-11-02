@@ -108,6 +108,14 @@ test('the exe on its own skips a path too long for it: that path, not the system
   assert.match(said, /^skip: /m)
 })
 
+test('told no exe to keep, compiles the window in memory and lays out a file', { skip }, () => {
+  const file = join(folder, 'memory.bin')
+  writeFileSync(file, 'x'.repeat(2048))
+  const { said, status } = run({ QUICK_PEEK_FILE: file, QUICK_PEEK_ASSEMBLY: undefined })
+  assert.equal(status, 0, said)
+  assert.match(said, DRY)
+})
+
 test('says a path that is not there', { skip }, () => {
   const { said, status } = run({ QUICK_PEEK_FILE: join(folder, 'missing.txt') })
   assert.equal(status, 0)

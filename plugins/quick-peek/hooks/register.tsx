@@ -67,7 +67,7 @@ let windowing: 'macos' | 'windows' | undefined
 let hovered: { path: string; line: number | undefined; target: string } | undefined
 let window: { path: string; line: number | undefined; isOpen: boolean } | undefined
 let failures = 0
-let assembly: Promise<string> | undefined
+let assembly: Promise<string | undefined> | undefined
 
 /** The system the session runs on, asked once. */
 function platformOf ($: Engine) {
@@ -396,16 +396,16 @@ async function openWindow ($: Engine, path: string, line: number | undefined) {
     // PowerShell's time and memory. PowerShell runs it for a PDF, whose first page it renders, and
     // where the exe does not start; it is told the C#, too long for a command line, in the environment.
     const exe = await assemblyOf($)
-    env.QUICK_PEEK_ASSEMBLY = exe
-    isDirect = !(!code && /\.pdf$/i.test(path)) && (await $.fs.exists(exe).catch(() => false))
-    argv = isDirect ? [exe] : await powershellOf($, WINDOWS)
+    if (exe) env.QUICK_PEEK_ASSEMBLY = exe
+    isDirect = exe !== undefined && !(!code && /\.pdf$/i.test(path)) && (await $.fs.exists(exe).catch(() => false))
+    argv = exe && isDirect ? [exe] : await powershellOf($, WINDOWS)
     if (!isDirect) env.QUICK_PEEK_TYPES = WINDOWS_TYPES
   }
   // The pointer may have gone to another path while the mod looked for the exe: nothing starts.
   if (!opening.isOpen) return
   let { isShown, said } = await show($, opening, argv, env)
   if (isDirect && !isShown && opening.isOpen && !/^(skip|error):/m.test(said)) {
-    // An exe that did not start (AppLocker may refuse one in the temp folder; an antivirus may hold
+    // An exe that did not start (AppLocker may refuse one in a user's folder; an antivirus may hold
     // one it scans): PowerShell shows this window. Nothing is kept: the next hover tries the exe.
     $.ui.log(`quick-peek: the window's exe did not start (${reasonOf(said)}); PowerShell runs it`, { to: 'debug' })
     ;({ isShown, said } = await show($, opening, await powershellOf($, WINDOWS), { ...env, QUICK_PEEK_TYPES: WINDOWS_TYPES }))
@@ -447,9 +447,15 @@ async function show ($: Engine, opening: { isOpen: boolean }, argv: string[], en
 /** What a program said as it failed, to log: PowerShell may write in UTF-16, its NULs dropped. */
 const reasonOf = (said: string) => said.replaceAll('\u0000', '').replace(/\.\r?\n/g, '').trim().slice(0, 300) || 'the program could not start'
 
-/** Where the compiled window is: the temp folder, named by its source's hash. */
+/**
+ * Where the compiled window is kept, named by its source's hash: a folder of the user's own, in
+ * LOCALAPPDATA, where no other user may leave a program of that name. With none, no exe is kept.
+ */
 function assemblyOf ($: Engine) {
-  assembly ??= (async () => `${((await $.env.get('TEMP')) ?? 'C:\\Windows\\Temp').replace(/[\\/]+$/, '')}\\${WINDOWS_BUILD}`)()
+  assembly ??= (async () => {
+    const local = await $.env.get('LOCALAPPDATA')
+    return local ? `${local.replace(/[\\/]+$/, '')}\\quick-peek\\${WINDOWS_BUILD}` : undefined
+  })()
   return assembly
 }
 

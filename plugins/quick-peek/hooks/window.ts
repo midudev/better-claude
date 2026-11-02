@@ -682,10 +682,11 @@ public static class QuickPeekMain {
 
 /**
  * Windows: PowerShell, which compiles the window (`WINDOWS_TYPES`, told in QUICK_PEEK_TYPES: too
- * long for a command line) once into an exe (QUICK_PEEK_ASSEMBLY, named by the source's hash in the
- * temp folder), then runs it. Later hovers start that exe on their own; PowerShell still runs it
- * for a PDF, whose first page it renders with Windows.Data.Pdf, as the shell may have no thumbnail
- * for it, and where the exe may not start.
+ * long for a command line) once into an exe (QUICK_PEEK_ASSEMBLY, named by the source's hash in a
+ * folder of the user's own), then runs it. Later hovers start that exe on their own; PowerShell
+ * still runs it for a PDF, whose first page it renders with Windows.Data.Pdf, as the shell may
+ * have no thumbnail for it, and where the exe may not start. Told no QUICK_PEEK_ASSEMBLY, it keeps
+ * no exe: it compiles the window in memory.
  */
 export const WINDOWS = String.raw`
 $ErrorActionPreference = 'Stop'
@@ -695,19 +696,25 @@ try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
 try {
   Add-Type -AssemblyName System.Windows.Forms, System.Drawing
   $assembly = $env:QUICK_PEEK_ASSEMBLY
-  if (-not (Test-Path -LiteralPath $assembly)) {
-    # Compiled aside, then moved in: another preview compiling it at the same time finds it whole.
-    $building = $assembly -replace '\.exe$', "-$PID.exe"
-    try {
-      Add-Type -OutputAssembly $building -OutputType WindowsApplication -ReferencedAssemblies System.Windows.Forms, System.Drawing, System.Web.Extensions -TypeDefinition $env:QUICK_PEEK_TYPES
-      Move-Item -LiteralPath $building -Destination $assembly
-    } catch {
-      if (-not (Test-Path -LiteralPath $assembly)) { throw }
-    } finally {
-      Remove-Item -LiteralPath $building -ErrorAction SilentlyContinue
+  if (-not $assembly) {
+    # No folder of the user's own to keep it in: compiled in memory, for this window only.
+    Add-Type -ReferencedAssemblies System.Windows.Forms, System.Drawing, System.Web.Extensions -TypeDefinition $env:QUICK_PEEK_TYPES
+  } else {
+    if (-not (Test-Path -LiteralPath $assembly)) {
+      $null = New-Item -ItemType Directory -Force -Path (Split-Path -Parent $assembly)
+      # Compiled aside, then moved in: another preview compiling it at the same time finds it whole.
+      $building = $assembly -replace '\.exe$', "-$PID.exe"
+      try {
+        Add-Type -OutputAssembly $building -OutputType WindowsApplication -ReferencedAssemblies System.Windows.Forms, System.Drawing, System.Web.Extensions -TypeDefinition $env:QUICK_PEEK_TYPES
+        Move-Item -LiteralPath $building -Destination $assembly
+      } catch {
+        if (-not (Test-Path -LiteralPath $assembly)) { throw }
+      } finally {
+        Remove-Item -LiteralPath $building -ErrorAction SilentlyContinue
+      }
     }
+    $null = [Reflection.Assembly]::LoadFrom($assembly)
   }
-  $null = [Reflection.Assembly]::LoadFrom($assembly)
   # A path it cannot take (too long, a character Windows refuses) is this path's, as one not there.
   try { $path = [IO.Path]::GetFullPath($env:QUICK_PEEK_FILE) } catch { [Console]::Out.WriteLine('skip: ' + $_.Exception.Message); exit 0 }
   if (-not (Test-Path -LiteralPath $path)) { [Console]::Out.WriteLine('skip: not there'); exit 0 }
