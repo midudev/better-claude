@@ -226,6 +226,35 @@ test('without a window, each path carries a card the terminal reveals over it', 
   expect(w.windows).toHaveLength(0)
 })
 
+/** Where the card of the first path sits: its column in the row, and how wide it is. */
+const cardAt = async (ui: Awaited<ReturnType<typeof reply>>) => {
+  const [box] = (await ui.findAll({ type: 'Box' })).filter(found => found.props.position === 'absolute')
+  const line = await ui.find({ type: 'Text', text: /ago $/ })
+  return { left: box!.props.left as number, width: line!.text!.length }
+}
+
+test('the card ends where its path does, not over its start, where a terminal says a click opens the file', cards, async ($, on) => {
+  world(on)
+  await startSession($)
+  const { left, width } = await cardAt(await reply($, `Listo: ${VIDEO}`))
+  expect(left).toBe(VIDEO.length - width)
+})
+
+test('the card of a path shorter than it starts where the path does', cards, async ($, on) => {
+  world(on)
+  await startSession($)
+  expect((await cardAt(await reply($, 'Mira README.md'))).left).toBe(0)
+})
+
+test('the card ends inside the reply: a path by its right edge moves it left', cards, async ($, on) => {
+  world(on)
+  await startSession($)
+  const at = 47
+  const { left, width } = await cardAt(await reply($, `${'x'.repeat(at - 1)} README.md`))
+  // The reply is 58 columns wide: the screen's 60, less the bullet's two.
+  expect(at + left + width).toBe(58)
+})
+
 test('without a window, the card of a file of code is its size and age, with none of its lines', cards, async ($, on) => {
   world(on)
   await startSession($)

@@ -226,10 +226,12 @@ function drawRows (ui: Ui, rows: Row[], width: number, targets: Target[], parts:
           const client = <Client key={`path:${run.link}:${part}`} module="./link.tsx" props={props} />
           if (windowing) return client
           // No window: a card over the path, which the terminal reveals while the pointer is on it,
-          // moved left as far as it needs to end inside the reply.
+          // ending where the path does, or starting where it does if the path is the shorter, and
+          // moved left as far as it needs to end inside the reply. Not over the path's start: that
+          // is where a terminal that opens a file on a click says so.
           const card = cardOf(target)
           const cardWidth = Math.min(widthOf(card), width)
-          const left = Math.max(-at, Math.min(0, width - at - cardWidth))
+          const left = Math.max(-at, Math.min(Math.max(0, widthOf(run.text) - cardWidth), width - at - cardWidth))
           return (
             <Box key={`card:${run.link}:${part}`}>
               {client}
