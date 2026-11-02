@@ -82,11 +82,14 @@ function platformOf ($: Engine) {
   return platform
 }
 
-/** How PowerShell runs `script`: by its full path, in the Windows folder the session names. */
-function powershellOf ($: Engine, script: string) {
+/** The Windows folder the session names (SystemRoot), else C:\Windows: where its programs are. */
+function windowsRootOf ($: Engine) {
   windowsRoot ??= (async () => ((await $.env.get('SystemRoot')) || 'C:\\Windows').replace(/[\\/]+$/, ''))()
-  return windowsRoot.then(root => powershell(script, root))
+  return windowsRoot
 }
+
+/** How PowerShell runs `script`: by its full path, in the Windows folder. */
+const powershellOf = async ($: Engine, script: string) => powershell(script, await windowsRootOf($))
 
 /** Whether the session runs under WSL: Linux, on a Windows desktop, whose file manager shows the path. */
 function wslOf ($: Engine) {
@@ -354,7 +357,7 @@ function swap (drawn: RenderElement, mine: RenderElement): RenderElement {
 
 /** Shows `path` in the system's file manager, selected; with `isOpening`, opens it instead. */
 async function reveal ($: Engine, path: string, isOpening: boolean) {
-  const run = (argv: string[]) => $.process.run(argv).catch(() => undefined)
+  const run = (argv: string[], env?: Record<string, string>) => $.process.run(argv, env && { env }).catch(() => undefined)
   if (await wslOf($)) {
     const windows = (await run(['wslpath', '-w', path]))?.stdout.trim()
     if (windows) await run(isOpening ? ['explorer.exe', windows] : ['explorer.exe', `/select,${windows}`])
@@ -366,8 +369,14 @@ async function reveal ($: Engine, path: string, isOpening: boolean) {
     return
   }
   if (system === 'windows') {
-    const env = { QUICK_PEEK_FILE: path.replaceAll('/', '\\') }
-    await $.process.run(await powershellOf($, isOpening ? WINDOWS_OPEN : WINDOWS_REVEAL), { env }).catch(() => undefined)
+    // The compiled window asks the shell, in milliseconds; where it is not there or fails,
+    // PowerShell; where PowerShell may not run either (AppLocker), Explorer itself, by its full path.
+    const file = path.replaceAll('/', '\\')
+    const env = { QUICK_PEEK_FILE: file, QUICK_PEEK_ACTION: isOpening ? 'open' : 'reveal' }
+    const exe = await assemblyOf($)
+    if (exe && (await $.fs.exists(exe).catch(() => false)) && (await run([exe], env))?.exitCode === 0) return
+    if ((await run(await powershellOf($, isOpening ? WINDOWS_OPEN : WINDOWS_REVEAL), env))?.exitCode === 0) return
+    await run([`${await windowsRootOf($)}\\explorer.exe`, isOpening ? file : `/select,${file}`])
     return
   }
   if (isOpening) {

@@ -656,6 +656,18 @@ public class QuickPeekWindow : Form {
 
 // The window started on its own, no PowerShell: the path told in QUICK_PEEK_FILE.
 public static class QuickPeekMain {
+  // Explorer with path selected, by its full path, or path opened with its app: through the shell,
+  // told to show the window, as a program the engine starts hidden would open it hidden.
+  static int Act (string path, bool isOpening) {
+    System.Diagnostics.ProcessStartInfo start = isOpening
+      ? new System.Diagnostics.ProcessStartInfo(path)
+      : new System.Diagnostics.ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe"), "/select,\"" + path + "\"");
+    start.UseShellExecute = true;
+    start.WindowStyle = System.Diagnostics.ProcessWindowStyle.Normal;
+    System.Diagnostics.Process.Start(start);
+    return 0;
+  }
+
   [STAThread]
   public static int Main () {
     string path;
@@ -671,6 +683,9 @@ public static class QuickPeekMain {
       return 0;
     }
     try {
+      // Asked to show the path in Explorer, or to open it (QUICK_PEEK_ACTION), not to preview it.
+      string action = Environment.GetEnvironmentVariable("QUICK_PEEK_ACTION");
+      if (action == "reveal" || action == "open") return Act(path, action == "open");
       return QuickPeekWindow.Run(path, null);
     } catch (Exception error) {
       Console.Out.WriteLine("error: " + error.Message);
@@ -768,11 +783,12 @@ try {
 `
 
 /**
- * Windows: Explorer with QUICK_PEEK_FILE selected, and the file or folder opened with its app.
- * Started hidden, as the engine starts a program, Explorer opens its window hidden too: the shell
- * is asked through PowerShell, which opens it shown.
+ * Windows, where the compiled window is not there or does not start: Explorer with QUICK_PEEK_FILE
+ * selected, and the file or folder opened with its app. Started hidden, as the engine starts a
+ * program, Explorer opens its window hidden too: the shell is asked through PowerShell, which opens
+ * it shown. Explorer by its full path: by its name, the shell looks in the project first.
  */
-export const WINDOWS_REVEAL = String.raw`Start-Process explorer -ArgumentList ('/select,"' + $env:QUICK_PEEK_FILE + '"')`
+export const WINDOWS_REVEAL = String.raw`Start-Process (Join-Path $env:SystemRoot 'explorer.exe') -ArgumentList ('/select,"' + $env:QUICK_PEEK_FILE + '"')`
 export const WINDOWS_OPEN = String.raw`Invoke-Item -LiteralPath $env:QUICK_PEEK_FILE`
 
 /** The name the compiled window takes: a hash of its source (FNV-1a), so a new source compiles anew. */

@@ -26,7 +26,7 @@ const SCREEN = { columns: 60, rows: 40, isFullscreen: true }
  * Everything beneath the mod: the session, the files that are there, the programs it runs, the
  * window's program, and what the engine draws.
  */
-function world (on: On, { system = 'Darwin', env = {}, cwd = '/project/app', program = 'shows', isCompiled = false, existsMs = 0 }: { system?: string; env?: Record<string, string>; cwd?: string; program?: 'shows' | 'fails' | 'crashes once' | 'exe blocked' | 'skips once' | 'osascript fails'; isCompiled?: boolean; existsMs?: number } = {}) {
+function world (on: On, { system = 'Darwin', env = {}, cwd = '/project/app', program = 'shows', isCompiled = false, existsMs = 0, refused = [] }: { system?: string; env?: Record<string, string>; cwd?: string; program?: 'shows' | 'fails' | 'crashes once' | 'exe blocked' | 'skips once' | 'osascript fails'; isCompiled?: boolean; existsMs?: number; refused?: string[] } = {}) {
   const clock = mock.clock(on, { now: 0 })
   mock.env(on, { HOME: '/Users/ana', ...env })
   const there: Record<string, 'file' | 'dir'> = { [VIDEO]: 'file', [FOLDER]: 'dir', [README]: 'file', [SOURCE]: 'file', [PDF]: 'file', [NUMBERS]: 'file' }
@@ -45,7 +45,9 @@ function world (on: On, { system = 'Darwin', env = {}, cwd = '/project/app', pro
     runs.push([...e.argv])
     envs.push(e.init?.env && { ...e.init.env })
     const stdout = e.argv[0] === 'uname' ? `${system}\n` : e.argv[0] === 'wslpath' ? 'C:\\Users\\ana\\videos\\borrador.mp4\n' : ''
-    return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    // A program the system refuses to start (AppLocker) ends at once, failing.
+    const exitCode = refused.some(name => e.argv[0]!.endsWith(name)) ? 1 : 0
+    return { value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   on('fs.stat', ($, e) => {
     const path = posix(e.path)
@@ -105,7 +107,7 @@ function world (on: On, { system = 'Darwin', env = {}, cwd = '/project/app', pro
   })
   // A program run, with what it was told in its environment.
   const ran = (argv: string[]) => envs[runs.findIndex(run => run.length === argv.length && run.every((arg, i) => arg === argv[i]))]
-  return { clock, runs, ran, windows, logs }
+  return { clock, runs, envs, ran, windows, logs }
 }
 
 const startSession = ($: Engine) => $.session.start({ cwd: '/project/app', surface: 'terminal', isInteractive: true })
@@ -564,11 +566,41 @@ test('on Windows a click selects the path in Explorer, an alt-click opens it: th
   await ui.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'path:0:0' })
   await ui.pointer({ type: 'up', x: 2, y: 0, button: 'left', in: 'path:0:0' })
   await w.clock.settle()
-  expect(w.ran(powershell(WINDOWS_REVEAL))).toEqual({ QUICK_PEEK_FILE: '\\project\\app\\src\\app.ts' })
+  expect(w.ran(powershell(WINDOWS_REVEAL))).toEqual({ QUICK_PEEK_FILE: '\\project\\app\\src\\app.ts', QUICK_PEEK_ACTION: 'reveal' })
   await ui.pointer({ type: 'down', x: 2, y: 0, button: 'left', alt: true, in: 'path:0:0' })
   await ui.pointer({ type: 'up', x: 2, y: 0, button: 'left', alt: true, in: 'path:0:0' })
   await w.clock.settle()
-  expect(w.ran(powershell(WINDOWS_OPEN))).toEqual({ QUICK_PEEK_FILE: '\\project\\app\\src\\app.ts' })
+  expect(w.ran(powershell(WINDOWS_OPEN))).toEqual({ QUICK_PEEK_FILE: '\\project\\app\\src\\app.ts', QUICK_PEEK_ACTION: 'open' })
   // Started straight, Explorer would open its window hidden.
   expect(w.runs.some(argv => argv[0] === 'explorer')).toBe(false)
+})
+
+/** A click on the first path of a reply naming `src/app.ts`, with Alt or not. */
+async function click (ui: Awaited<ReturnType<typeof reply>>, w: ReturnType<typeof world>, alt = false) {
+  await ui.resize({ columns: 10, rows: 1, in: 'path:0:0' })
+  await ui.pointer({ type: 'down', x: 2, y: 0, button: 'left', ...(alt ? { alt: true as const } : {}), in: 'path:0:0' })
+  await ui.pointer({ type: 'up', x: 2, y: 0, button: 'left', ...(alt ? { alt: true as const } : {}), in: 'path:0:0' })
+  await w.clock.settle()
+}
+
+test('on Windows, once compiled, a click has the exe ask the shell, in milliseconds: no PowerShell', async ($, on) => {
+  const w = world(on, { ...WINDOWS_HOST, isCompiled: true })
+  await startSession($)
+  const ui = await reply($, 'Mira `src/app.ts`')
+  await click(ui, w)
+  expect(w.ran([EXE])).toEqual({ QUICK_PEEK_FILE: '\\project\\app\\src\\app.ts', QUICK_PEEK_ACTION: 'reveal' })
+  await click(ui, w, true)
+  expect(w.envs.at(-1)).toEqual({ QUICK_PEEK_FILE: '\\project\\app\\src\\app.ts', QUICK_PEEK_ACTION: 'open' })
+  expect(w.runs.filter(argv => argv[0] !== 'uname').map(argv => argv[0])).toEqual([EXE, EXE])
+})
+
+test('on Windows, where neither the exe nor PowerShell may run (AppLocker), a click starts Explorer itself, by its full path', async ($, on) => {
+  const w = world(on, { ...WINDOWS_HOST, isCompiled: true, refused: [WINDOWS_BUILD, 'powershell.exe'] })
+  await startSession($)
+  const ui = await reply($, 'Mira `src/app.ts`')
+  await click(ui, w)
+  expect(w.runs.filter(argv => argv[0] !== 'uname').map(argv => argv[0])).toEqual([EXE, POWERSHELL, 'C:\\Windows\\explorer.exe'])
+  expect(w.runs.at(-1)).toEqual(['C:\\Windows\\explorer.exe', '/select,\\project\\app\\src\\app.ts'])
+  await click(ui, w, true)
+  expect(w.runs.at(-1)).toEqual(['C:\\Windows\\explorer.exe', '\\project\\app\\src\\app.ts'])
 })
