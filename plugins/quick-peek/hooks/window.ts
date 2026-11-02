@@ -751,11 +751,16 @@ try {
       $tasks = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 }
       $operation = $tasks | Where-Object { $_.GetParameters()[0].ParameterType.Name -like 'IAsyncOperation?1' }
       $action = $tasks | Where-Object { $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncAction' }
-      function Wait ($pending, $type) {
-        $task = $operation.MakeGenericMethod($type).Invoke($null, @($pending))
-        $null = $task.Wait(5000)
-        $task.Result
+      # Its first page in 5 seconds in all (QUICK_PEEK_PDF_MS), or none: a large PDF on a network
+      # drive shows the shell's thumbnail, and the window comes, so the mod may end it.
+      $budget = 5000
+      if ($env:QUICK_PEEK_PDF_MS) { $budget = [int]$env:QUICK_PEEK_PDF_MS }
+      $clock = [Diagnostics.Stopwatch]::StartNew()
+      function Done ($task) {
+        if (-not $task.Wait([Math]::Max(0, $budget - $clock.ElapsedMilliseconds))) { throw 'the PDF took too long' }
+        $task
       }
+      function Wait ($pending, $type) { (Done ($operation.MakeGenericMethod($type).Invoke($null, @($pending)))).Result }
       $file = Wait ([Windows.Storage.StorageFile]::GetFileFromPathAsync($path)) ([Windows.Storage.StorageFile])
       $document = Wait ([Windows.Data.Pdf.PdfDocument]::LoadFromFileAsync($file)) ([Windows.Data.Pdf.PdfDocument])
       $first = $document.GetPage(0)
@@ -764,7 +769,7 @@ try {
       $options.DestinationWidth = [uint32][Math]::Max(1, $first.Size.Width * $fit)
       $options.DestinationHeight = [uint32][Math]::Max(1, $first.Size.Height * $fit)
       $stream = New-Object Windows.Storage.Streams.InMemoryRandomAccessStream
-      $null = $action.Invoke($null, @($first.RenderToStreamAsync($stream, $options))).Wait(5000)
+      $null = Done ($action.Invoke($null, @($first.RenderToStreamAsync($stream, $options))))
       $stream.Seek(0)
       $memory = New-Object IO.MemoryStream
       [System.IO.WindowsRuntimeStreamExtensions]::AsStreamForRead($stream).CopyTo($memory)

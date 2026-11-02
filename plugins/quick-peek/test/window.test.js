@@ -129,6 +129,15 @@ test('compiles the window where its environment would pass the 64 KB .NET starts
   assert.match(said, DRY)
 })
 
+test('a PDF whose page does not come in time shows the window all the same, without it', { skip }, t => {
+  const file = join(folder, 'slow.pdf')
+  writeFileSync(file, pdf())
+  const { said, status, ms } = run({ QUICK_PEEK_FILE: file, QUICK_PEEK_PDF_MS: '1' })
+  t.diagnostic(`given 1 ms: ${ms} ms, ${said.match(DRY)?.[0]}`)
+  assert.equal(status, 0, said)
+  assert.match(said, DRY)
+})
+
 test('says a path that is not there', { skip }, () => {
   const { said, status } = run({ QUICK_PEEK_FILE: join(folder, 'missing.txt') })
   assert.equal(status, 0)
