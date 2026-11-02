@@ -401,6 +401,8 @@ async function openWindow ($: Engine, path: string, line: number | undefined) {
     argv = isDirect ? [exe] : await powershellOf($, WINDOWS)
     if (!isDirect) env.QUICK_PEEK_TYPES = WINDOWS_TYPES
   }
+  // The pointer may have gone to another path while the mod looked for the exe: nothing starts.
+  if (!opening.isOpen) return
   let { isShown, said } = await show($, opening, argv, env)
   if (isDirect && !isShown && opening.isOpen && !/^(skip|error):/m.test(said)) {
     // An exe that did not start (AppLocker may refuse one in the temp folder; an antivirus may hold

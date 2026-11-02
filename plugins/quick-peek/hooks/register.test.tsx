@@ -22,12 +22,16 @@ const SCREEN = { columns: 60, rows: 40, isFullscreen: true }
  * Everything beneath the mod: the session, the files that are there, the programs it runs, the
  * window's program, and what the engine draws.
  */
-function world (on: On, { system = 'Darwin', env = {}, cwd = '/project/app', program = 'shows', isCompiled = false }: { system?: string; env?: Record<string, string>; cwd?: string; program?: 'shows' | 'fails' | 'crashes once' | 'exe blocked' | 'skips once' | 'osascript fails'; isCompiled?: boolean } = {}) {
+function world (on: On, { system = 'Darwin', env = {}, cwd = '/project/app', program = 'shows', isCompiled = false, existsMs = 0 }: { system?: string; env?: Record<string, string>; cwd?: string; program?: 'shows' | 'fails' | 'crashes once' | 'exe blocked' | 'skips once' | 'osascript fails'; isCompiled?: boolean; existsMs?: number } = {}) {
   const clock = mock.clock(on, { now: 0 })
   mock.env(on, { HOME: '/Users/ana', ...env })
   const there: Record<string, 'file' | 'dir'> = { [VIDEO]: 'file', [FOLDER]: 'dir', [README]: 'file', [SOURCE]: 'file', [PDF]: 'file' }
   // On Windows, whether the window was compiled already: its exe in the temp folder.
-  on('fs.exists', ($, e) => ({ value: isCompiled && e.path.endsWith('.exe') }))
+  // Looking for it takes `existsMs`: a slow disk.
+  on('fs.exists', async ($, e) => {
+    if (existsMs) await clock.sleep(existsMs)
+    return { value: isCompiled && e.path.endsWith('.exe') }
+  })
   const runs: string[][] = []
   const envs: (Record<string, string> | undefined)[] = []
   on('session.start', ($, e) => ({ cwd: e.cwd }))
@@ -419,6 +423,20 @@ test('on Windows an exe that does not start (AppLocker) has PowerShell show that
   await w.clock.advance(300)
   expect(w.windows.map(opened => opened.argv[0])).toEqual([EXE, POWERSHELL, EXE, POWERSHELL])
   expect(w.windows[3]!.isEnded).toBe(false)
+})
+
+test('on Windows a path the pointer left while the mod looked for the exe starts nothing: only the path it went to opens', async ($, on) => {
+  const w = world(on, { ...WINDOWS_HOST, isCompiled: true, existsMs: 100 })
+  await startSession($)
+  const ui = await reply($, `Listo: ${VIDEO} y ${README}`)
+  await ui.pointer({ type: 'enter', x: 0, y: 0, in: 'path:0:0' })
+  // It rests long enough to open, then goes to the other path as the mod looks for the exe.
+  await w.clock.advance(180)
+  await ui.pointer({ type: 'leave', x: 3, y: 0, in: 'path:0:0' })
+  await ui.pointer({ type: 'enter', x: 0, y: 0, in: 'path:1:0' })
+  await w.clock.advance(400)
+  expect(w.windows.map(opened => opened.env.QUICK_PEEK_FILE)).toEqual([README])
+  expect(w.windows[0]!.isEnded).toBe(false)
 })
 
 test('on Windows a path the window cannot show (too long) is skipped: no PowerShell, no cards, and the next hover opens the window', async ($, on) => {
