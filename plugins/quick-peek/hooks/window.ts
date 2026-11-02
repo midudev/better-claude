@@ -401,10 +401,12 @@ public class QuickPeekWindow : Form {
     List<string> entries = new List<string>();
     if (folder) {
       try {
-        foreach (string entry in Directory.GetFileSystemEntries(path)) {
-          string entryName = Path.GetFileName(entry);
-          if (entryName.StartsWith(".") || (File.GetAttributes(entry) & FileAttributes.Hidden) != 0) continue;
-          entries.Add(entryName + (Directory.Exists(entry) ? "\\" : ""));
+        // Each entry as the listing gives it, its attributes with it: no call more to the disk for
+        // each. All of them, as the count and the order the window shows need them.
+        foreach (FileSystemInfo entry in new DirectoryInfo(path).EnumerateFileSystemInfos()) {
+          FileAttributes attributes = entry.Attributes;
+          if (entry.Name.StartsWith(".") || (attributes & FileAttributes.Hidden) != 0) continue;
+          entries.Add(entry.Name + ((attributes & FileAttributes.Directory) != 0 ? "\\" : ""));
         }
         entries.Sort(StrCmpLogicalW);
         details.Add(entries.Count == 1 ? "1 item" : entries.Count + " items");

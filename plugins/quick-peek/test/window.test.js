@@ -111,6 +111,18 @@ describe('the Windows window', { skip }, () => {
     assert.equal(said.match(DRY)[3], '6')
   })
 
+  test('lists a folder that holds a file named nul, a name Windows reserves: its entries and count all the same', () => {
+    const inside = join(folder, 'reserved')
+    mkdirSync(join(inside, 'sub'), { recursive: true })
+    writeFileSync(join(inside, 'a.txt'), 'a')
+    // A Unix shell makes one with `> nul`; only the long form of its path names it.
+    writeFileSync(`\\\\?\\${join(inside, 'nul')}`, 'x')
+    const { said, status } = run({ QUICK_PEEK_FILE: inside })
+    assert.equal(status, 0, said)
+    // The name, the details, three entries (a.txt, nul, sub), the folder it is in.
+    assert.equal(said.match(DRY)[3], '6')
+  })
+
   test('renders a PDF\'s first page: a portrait page makes a window taller than wide', () => {
     const file = join(folder, 'page.pdf')
     writeFileSync(file, pdf())
