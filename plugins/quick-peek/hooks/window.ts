@@ -728,6 +728,11 @@ try {
       try {
         Add-Type -OutputAssembly $building -OutputType WindowsApplication -ReferencedAssemblies System.Windows.Forms, System.Drawing, System.Web.Extensions -TypeDefinition $types
         Move-Item -LiteralPath $building -Destination $assembly
+        # The exes of older sources go: not one another preview is compiling (its name ends in its
+        # PID), nor one still running, which the next new source finds.
+        Get-ChildItem -LiteralPath (Split-Path -Parent $assembly) -Filter 'quick-peek-window-*.exe' |
+          Where-Object { $_.Name -match '^quick-peek-window-[0-9a-f]{8}\.exe$' -and $_.Name -ne (Split-Path -Leaf $assembly) } |
+          Remove-Item -ErrorAction SilentlyContinue
       } catch {
         if (-not (Test-Path -LiteralPath $assembly)) { throw }
       } finally {
@@ -796,12 +801,19 @@ try {
 export const WINDOWS_REVEAL = String.raw`Start-Process (Join-Path $env:SystemRoot 'explorer.exe') -ArgumentList ('/select,"' + $env:QUICK_PEEK_FILE + '"')`
 export const WINDOWS_OPEN = String.raw`Invoke-Item -LiteralPath $env:QUICK_PEEK_FILE`
 
-/** The name the compiled window takes: a hash of its source (FNV-1a), so a new source compiles anew. */
-export const WINDOWS_BUILD = (() => {
+/** The name an exe compiled from `sources` takes: their hash (FNV-1a), so new ones compile anew. */
+export function buildName (...sources: string[]) {
+  const text = sources.join('\u0000')
   let hash = 0x811c9dc5
-  for (let i = 0; i < WINDOWS_TYPES.length; i++) hash = Math.imul(hash ^ WINDOWS_TYPES.charCodeAt(i), 0x01000193)
+  for (let i = 0; i < text.length; i++) hash = Math.imul(hash ^ text.charCodeAt(i), 0x01000193)
   return `quick-peek-window-${(hash >>> 0).toString(16).padStart(8, '0')}.exe`
-})()
+}
+
+/**
+ * The name the compiled window takes: from its C# and the script that compiles it, whose options
+ * (the assemblies it references, the kind of program) make the exe as much as the C# does.
+ */
+export const WINDOWS_BUILD = buildName(WINDOWS_TYPES, WINDOWS)
 
 const encodedCache = new Map<string, string>()
 

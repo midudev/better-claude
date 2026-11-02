@@ -6,7 +6,7 @@ import type { On } from 'claude-code'
 import { excerptOf, languageOf, tokenize } from './code'
 import { blocks, inline, items, wrap } from './markdown'
 import { lineOf, pathOfSpan, pathsIn, resolve } from './paths'
-import { WINDOWS, WINDOWS_BUILD, WINDOWS_OPEN, WINDOWS_REVEAL, WINDOWS_TYPES, encodedCommand, powershell } from './window'
+import { WINDOWS, WINDOWS_BUILD, WINDOWS_OPEN, WINDOWS_REVEAL, WINDOWS_TYPES, buildName, encodedCommand, powershell } from './window'
 
 const VIDEO = '/Users/ana/videos/borrador.mp4'
 const FOLDER = '/Users/ana/videos'
@@ -132,6 +132,14 @@ test('finds absolute, home, relative and bare paths, and cuts what a sentence ad
   expect(resolve('~/x', 'C:\\project\\app', 'C:\\Users\\ana')).toBe('C:/Users/ana/x')
   expect(resolve('C:\\Users\\ana\\x.mp4', '/project/app', undefined)).toBe('C:\\Users\\ana\\x.mp4')
   expect(found('Mira C:/Users/ana/x.mp4 y C:\\Users\\ana\\y.md')).toEqual([['C:/Users/ana/x.mp4', 'C:/Users/ana/x.mp4'], ['C:\\Users\\ana\\y.md', 'C:\\Users\\ana\\y.md']])
+})
+
+test('the compiled window is named by its C# and the script that compiles it: a change to either compiles it anew', () => {
+  expect(WINDOWS_BUILD).toMatch(/^quick-peek-window-[0-9a-f]{8}\.exe$/)
+  expect(buildName(WINDOWS_TYPES, WINDOWS)).toBe(WINDOWS_BUILD)
+  // Another option to Add-Type, the C# as it was.
+  expect(buildName(WINDOWS_TYPES, WINDOWS.replace('-OutputType WindowsApplication', '-OutputType ConsoleApplication'))).not.toBe(WINDOWS_BUILD)
+  expect(buildName(`${WINDOWS_TYPES} `, WINDOWS)).not.toBe(WINDOWS_BUILD)
 })
 
 test('a path with a line names it; a file of code or text is known by its name, and its lines are tokens', () => {

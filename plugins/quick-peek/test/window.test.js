@@ -5,7 +5,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -136,6 +136,20 @@ test('a PDF whose page does not come in time shows the window all the same, with
   t.diagnostic(`given 1 ms: ${ms} ms, ${said.match(DRY)?.[0]}`)
   assert.equal(status, 0, said)
   assert.match(said, DRY)
+})
+
+test('compiling the window anew removes the exes of older sources, not one another preview is compiling', { skip }, () => {
+  const kept = join(folder, 'kept')
+  mkdirSync(kept)
+  const older = join(kept, 'quick-peek-window-00000000.exe')
+  const building = join(kept, 'quick-peek-window-00000000-4242.exe')
+  const other = join(kept, 'notes.txt')
+  for (const file of [older, building, other]) writeFileSync(file, '')
+  const file = join(folder, 'kept.bin')
+  writeFileSync(file, 'x'.repeat(64))
+  const { said, status } = run({ QUICK_PEEK_FILE: file, QUICK_PEEK_ASSEMBLY: join(kept, WINDOWS_BUILD) })
+  assert.equal(status, 0, said)
+  assert.deepEqual(readdirSync(kept).sort(), [WINDOWS_BUILD, 'notes.txt', 'quick-peek-window-00000000-4242.exe'].sort())
 })
 
 test('says a path that is not there', { skip }, () => {
