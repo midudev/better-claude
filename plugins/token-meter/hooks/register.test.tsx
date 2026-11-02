@@ -42,12 +42,43 @@ test('the session total adds up across turns', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: '  ·  session ↑ 2.0k  ↓ 400' })).toBeDefined()
 })
 
-test('millions of tokens read as M, not as thousands of k', async ($, on) => {
+test('millions and billions of tokens read as M and B', async ($, on) => {
   world(on)
-  await turnEnd($, { ...USAGE, input_tokens: 1_234_567, output_tokens: 999_960 })
+  await turnEnd($, { ...USAGE, input_tokens: 1_234_567, output_tokens: 42_000_000, cache_read_input_tokens: 3_456_789_012 })
   const ui = await hint($)
   expect(await ui.find({ type: 'Text', text: ' 1.2M  ' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' 42.0M  ' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' 3.5B' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '  ·  session ↑ 1.2M  ↓ 42.0M' })).toBeDefined()
+})
+
+test('a count that rounds to 1000 of a unit moves up to the next one', async ($, on) => {
+  world(on)
+  await turnEnd($, { ...USAGE, input_tokens: 999_949, output_tokens: 999_950, cache_read_input_tokens: 999_950_000 })
+  const ui = await hint($)
+  expect(await ui.find({ type: 'Text', text: ' 999.9k  ' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: ' 1.0M  ' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' 1.0B' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '  ·  session ↑ 999.9k  ↓ 1.0M' })).toBeDefined()
+})
+
+test('a half rounds up at every size', async ($, on) => {
+  world(on)
+  await turnEnd($, { ...USAGE, input_tokens: 1_150, output_tokens: 1_150_000, cache_read_input_tokens: 1_250_000 })
+  const ui = await hint($)
+  expect(await ui.find({ type: 'Text', text: ' 1.2k  ' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' 1.2M  ' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' 1.3M' })).toBeDefined()
+})
+
+test('a count missing from the usage reads as zero, not NaN', async ($, on) => {
+  world(on)
+  const missing = { ...USAGE, cache_creation_input_tokens: undefined } as unknown as typeof USAGE
+  await turnEnd($, missing)
+  await turnEnd($, missing)
+  const ui = await hint($)
+  expect(await ui.find({ type: 'Text', text: ' 4.1k' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '  ·  session ↑ 2.4k  ↓ 680' })).toBeDefined()
 })
 
 test('before any turn the hint line is left alone', async ($, on) => {

@@ -7,8 +7,22 @@ const ZERO: Tokens = { input: 0, output: 0, cached: 0 }
 const turn = atom({ plugin: 'token-meter', key: 'turn' } as const, null as Tokens | null)
 const session = atom({ plugin: 'token-meter', key: 'session' } as const, ZERO)
 
-// From 999_950 on, k would round to 1000.0k
-const short = (n: number) => (n >= 999_950 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`)
+const UNITS = ['k', 'M', 'B']
+
+// One decimal, rounded half up from the count itself (an integer over a power of
+// ten lands exactly on .5, where toFixed would see 1.15 as 1.1499…). A count that
+// rounds to 1000 of a unit moves up to the next one: 999_950 reads 1.0M, not 1000.0k.
+const short = (n: number) => {
+  if (n < 1000) return `${n}`
+  let unit = 0
+  let tenths = Math.round(n / 100)
+  while (tenths >= 10_000 && unit < UNITS.length - 1) tenths = Math.round(n / (100 * 1000 ** ++unit))
+  return `${Math.floor(tenths / 10)}.${tenths % 10}${UNITS[unit]}`
+}
+
+// The engine fills a count the response left out with zero; should one come
+// through missing anyway, it reads as zero rather than NaN for the rest of the session.
+const count = (n?: number) => (typeof n === 'number' && Number.isFinite(n) ? n : 0)
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
@@ -21,9 +35,9 @@ export const register: Register = on => {
     const usage = e.usage
     if (usage) {
       const last: Tokens = {
-        input: usage.input_tokens,
-        output: usage.output_tokens,
-        cached: usage.cache_read_input_tokens + usage.cache_creation_input_tokens
+        input: count(usage.input_tokens),
+        output: count(usage.output_tokens),
+        cached: count(usage.cache_read_input_tokens) + count(usage.cache_creation_input_tokens)
       }
       await update($, turn, () => last)
       await update($, session, total => ({
