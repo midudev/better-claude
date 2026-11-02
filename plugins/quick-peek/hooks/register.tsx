@@ -12,11 +12,8 @@ type Ui = Elements['terminal']
 type Message = Extract<EventOf['ui.render'], { component: 'AssistantMessage', surface: 'terminal' }>
 type Platform = 'macos' | 'linux' | 'windows' | 'other'
 
-/**
- * A path a reply names that leads somewhere: where it lands, what is there, and the line it names;
- * with no window, the lines of code or text its card shows.
- */
-type Target = { path: string; stat: FsStat; line?: number; code?: Excerpt }
+/** A path a reply names that leads somewhere: where it lands, what is there, and the line it names. */
+type Target = { path: string; stat: FsStat; line?: number }
 /** An item of a list the mod draws: its marker, its runs, the items under it, blank lines before it. */
 type DrawnItem = { marker: string; runs: Run[]; children: DrawnItem[]; gap: number }
 /** A part of a reply: drawn by the engine's Markdown, or by the mod, its paths links. */
@@ -38,12 +35,9 @@ const PLANS = 300
 // The longest side of the preview's picture, in points, and the most seconds the window stays.
 const WINDOW_SIZE = 360
 const WINDOW_LIFE = 60
-// The largest file of code or text read for its lines; the lines the window shows, the lines and
-// columns a card shows.
+// The largest file of code or text read for its lines, and the lines the window shows.
 const CODE_BYTES = 1024 * 1024
 const WINDOW_LINES = 20
-const CARD_LINES = 8
-const CARD_COLUMNS = 100
 
 const stats = new Map<string, { stat: FsStat | null; at: number }>()
 const plans = new Map<string, { plan: Plan | null; at: number }>()
@@ -185,13 +179,6 @@ async function planOf ($: Engine, text: string): Promise<Plan | null> {
     if (part.kind === 'markdown' && last?.kind === 'markdown') last.text += '\n'.repeat(part.gap + 1) + part.text
     else parts.push(part)
   })
-  // With no window, a card shows a file of code or text: its lines are read now.
-  if (!windowing) {
-    await Promise.all(targets.map(async target => {
-      const code = await excerptAt($, target.path, target.stat, target.line, CARD_LINES)
-      if (code) target.code = code
-    }))
-  }
   const plan = targets.length > 0 ? { parts, targets } : null
   if (plans.size >= PLANS) plans.delete(plans.keys().next().value!)
   plans.set(key, { plan, at: Date.now() })
@@ -207,11 +194,10 @@ const ago = (ms: number) => {
   return `${value} ${unit} ago`
 }
 
-/** The line the terminal shows over a path where no window can: what it is, and what a click does. */
+/** The line the terminal shows over a path where no window can: how large it is, and how long ago it changed. */
 function cardOf (target: Target) {
-  const name = target.path.slice(target.path.lastIndexOf('/') + 1) || target.path
   const what = target.stat.kind === 'dir' ? 'folder' : sizeOf(target.stat.size)
-  return ` ${name} · ${what} · ${ago(target.stat.mtimeMs)} · click: show in folder `
+  return ` ${what} · ${ago(target.stat.mtimeMs)} `
 }
 
 /**
@@ -219,7 +205,7 @@ function cardOf (target: Target) {
  * `Client` that takes the pointer.
  */
 function drawRows (ui: Ui, rows: Row[], width: number, targets: Target[], parts: Map<number, number>) {
-  const { Box, Client, Code, Link, Text } = ui
+  const { Box, Client, Link, Text } = ui
   return rows.map(row => {
     let column = 0
     return (
@@ -240,18 +226,15 @@ function drawRows (ui: Ui, rows: Row[], width: number, targets: Target[], parts:
           const client = <Client key={`path:${run.link}:${part}`} module="./link.tsx" props={props} />
           if (windowing) return client
           // No window: a card over the path, which the terminal reveals while the pointer is on it,
-          // moved left as far as it needs to end inside the reply. A file of code or text shows its
-          // lines under the card's line, coloured by the engine, on the background of the theme.
+          // moved left as far as it needs to end inside the reply.
           const card = cardOf(target)
-          const excerpt = target.code
-          const cardWidth = Math.min(excerpt ? Math.max(widthOf(card), CARD_COLUMNS) : widthOf(card), width)
+          const cardWidth = Math.min(widthOf(card), width)
           const left = Math.max(-at, Math.min(0, width - at - cardWidth))
           return (
             <Box key={`card:${run.link}:${part}`}>
               {client}
-              <Box position="absolute" top={-1 - (excerpt?.lines.length ?? 0)} left={left} width={cardWidth} flexDirection="column" display="none" hover={{ display: 'flex' }} {...(excerpt && { backgroundColor: 'inverseText' })}>
+              <Box position="absolute" top={-1} left={left} width={cardWidth} flexDirection="column" display="none" hover={{ display: 'flex' }}>
                 <Text inverse wrap="truncate-end">{card}</Text>
-                {excerpt && <Code source={excerpt.source} path={target.path} startLine={excerpt.first} wrap="truncate-end" />}
               </Box>
             </Box>
           )

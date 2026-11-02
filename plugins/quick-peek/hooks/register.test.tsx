@@ -216,19 +216,29 @@ test('without a window, each path carries a card the terminal reveals over it', 
   await startSession($)
   const ui = await reply($, `Listo: ${VIDEO}`)
   expect(await ui.find({ key: 'card:0:0' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /borrador\.mp4 · 12\.0 MB · .* ago · click: show in folder/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^ 12\.0 MB · \d+ (s|min|h|d) ago $/ })).toBeDefined()
+  // The card is hidden till the pointer is on the path, sits on the row above it, and holds that one line.
+  const [box] = (await ui.findAll({ type: 'Box' })).filter(found => found.props.position === 'absolute')
+  expect(box).toMatchObject({ props: { top: -1, display: 'none' } })
+  expect(box!.children).toHaveLength(1)
   await ui.pointer({ type: 'enter', x: 0, y: 0, in: 'path:0:0' })
   await w.clock.advance(100)
   expect(w.windows).toHaveLength(0)
 })
 
-test('without a window, the card of a file of code shows its first lines, coloured by the engine', cards, async ($, on) => {
+test('without a window, the card of a file of code is its size and age, with none of its lines', cards, async ($, on) => {
   world(on)
   await startSession($)
   const ui = await reply($, 'Mira src/app.ts y el vídeo ' + VIDEO)
-  expect(await ui.find({ type: 'Code' })).toMatchObject({ props: { source: CODE.trimEnd(), path: SOURCE, startLine: 1 } })
+  expect(await ui.find({ type: 'Code' })).toBeUndefined()
   expect(await ui.find({ key: 'card:0:0' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /app\.ts · \d+ B · .* ago · click: show in folder/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: new RegExp(`^ ${CODE.length} B · \\d+ (s|min|h|d) ago $`) })).toBeDefined()
+})
+
+test('without a window, the card of a folder says so, and how long ago it changed', cards, async ($, on) => {
+  world(on)
+  await startSession($)
+  expect(await (await reply($, `Está en ${FOLDER}`)).find({ type: 'Text', text: /^ folder · \d+ (s|min|h|d) ago $/ })).toBeDefined()
 })
 
 test('on Linux a click asks the file manager to select the path, with no window', async ($, on) => {

@@ -25,7 +25,7 @@ A path a row cannot hold is drawn in parts, cut after a `/`, and each part is th
 | System | Click | Hover |
 | --- | --- | --- |
 | macOS | Finder, the file selected | A window by the pointer, with the Quick Look thumbnail |
-| Linux | The file manager, the file selected (`org.freedesktop.FileManager1`), else its folder with `xdg-open` | A one-line card over the path: name, size, age; a file of code, its first 8 lines under it |
+| Linux | The file manager, the file selected (`org.freedesktop.FileManager1`), else its folder with `xdg-open` | A one-line card over the path: its size and how long ago it changed |
 | Windows | Explorer, the file selected (`explorer /select,`) | The card |
 | WSL | Windows' Explorer, the path turned into its Windows form by `wslpath -w` | The card |
 
@@ -46,8 +46,8 @@ Turn the window off with the **Preview in a window** option (`/config`) to get t
 - A path is looked at when the reply is drawn; one created later becomes a link the next time the reply is drawn (scrolling it into view).
 - Dragging to select text that starts on a path does not select: the path takes the pointer.
 - A window stays a minute at most, and closes when another app comes to the front or the pointer goes a few rows away (the terminal does not say when the pointer leaves it).
-- The card is drawn over the rows above the path (nine for a file of code): on the first rows on screen it is cut.
-- A file of code over 1 MB, or one with what text never holds (a NUL), shows its thumbnail or icon, not its lines. Its colours come from a small highlighter of the mod's own in the window, and from Claude Code's in the card; lines inside a block comment that opens above them are coloured as code.
+- The card is drawn over the row above the path: on the first row on screen it is cut.
+- A file of code over 1 MB, or one with what text never holds (a NUL), shows its thumbnail or icon, not its lines. Its colours come from a small highlighter of the mod's own; lines inside a block comment that opens above them are coloured as code.
 - An SVG is a picture: it shows its thumbnail, not its source.
 - Option-click needs the terminal to report the Option key with the click; some keep Option-click for themselves.
 
@@ -60,7 +60,7 @@ One hooks module ([`hooks/register.tsx`](hooks/register.tsx)), a surface module 
 - Each `Client` posts when the pointer comes onto it, moves on it and leaves it, and when it is clicked; a `ui.message` hook opens and closes the preview, or shows the path in the file manager.
 - On macOS a hover starts `osascript` with a JavaScript for Automation program, told the path (`QUICK_PEEK_FILE`), the picture's largest side and how long it may stay. It draws an AppKit panel that never takes the focus or the pointer, with the thumbnail from `QLThumbnailImageCreate` and the kind, size and date from the file's resource values, formatted by the system. It says `shown`, then a `.` every tenth of a second, so the mod wakes to end it when the pointer leaves.
 - A file of code or text is known by its name. The mod reads it with `$.fs.read`, cuts the lines a preview shows (around the line the path names), and colours them with a regex highlighter per language; the window is told them as JSON (`QUICK_PEEK_CODE`) and draws them on a plate, one monospaced label a line, in place of the thumbnail.
-- Without a window, each part of a path is a keyed `Box` holding a card drawn `display: "none"`, which the terminal reveals while the pointer is on the path, with no hook running. A file of code adds its lines to the card as a `Code` element, which Claude Code colours with its own highlighter.
+- Without a window, each part of a path is a keyed `Box` holding a card drawn `display: "none"`, which the terminal reveals while the pointer is on the path, with no hook running.
 
 ## Development
 
