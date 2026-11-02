@@ -770,6 +770,8 @@ export function encodedCommand (script: string) {
 
 /**
  * How PowerShell runs one of these scripts: no profile, no prompts, no script policy in the way,
- * in a single-threaded apartment, as Windows Forms and the shell's objects need.
+ * in a single-threaded apartment, as Windows Forms and the shell's objects need. Started by its
+ * full path in `root` (the Windows folder): by its name, Windows looks for it first in the folder
+ * the program starts in, the project's, where any `powershell.exe` would run instead.
  */
-export const powershell = (script: string) => ['powershell', '-NoProfile', '-NonInteractive', '-STA', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encodedCommand(script)]
+export const powershell = (script: string, root = 'C:\\Windows') => [`${root}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`, '-NoProfile', '-NonInteractive', '-STA', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encodedCommand(script)]

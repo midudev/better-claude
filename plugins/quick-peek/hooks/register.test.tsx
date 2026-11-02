@@ -58,7 +58,7 @@ function world (on: On, { system = 'Darwin', env = {}, cwd = '/project/app', pro
         return { value: { code: 1, signal: null } }
       }
       // An exe the system will not start from the temp folder.
-      if (program === 'exe blocked' && e.argv[0]!.endsWith('.exe')) {
+      if (program === 'exe blocked' && e.argv[0]!.endsWith(WINDOWS_BUILD)) {
         yield { stream: 'stderr' as const, text: 'This program is blocked by group policy.\n' }
         return { value: { code: 1, signal: null } }
       }
@@ -344,6 +344,8 @@ test('under WSL a click selects the path in Explorer', async ($, on) => {
 const WINDOWS_HOST = { system: '', cwd: '/project/app', env: { OS: 'Windows_NT', HOME: '/Users/ana', TEMP: 'C:\\Users\\ana\\AppData\\Local\\Temp' } }
 // The compiled window, where the mod looks for it.
 const EXE = `C:\\Users\\ana\\AppData\\Local\\Temp\\${WINDOWS_BUILD}`
+// PowerShell, where Windows keeps it: started by its full path, never by its name.
+const POWERSHELL = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'
 // The longest command line Windows starts, and the longest variable it holds, in characters.
 const WINDOWS_LIMIT = 32_767
 
@@ -354,7 +356,7 @@ test('on Windows the first hover has PowerShell compile the window into an exe, 
   await ui.pointer({ type: 'enter', x: 0, y: 0, in: 'path:0:0' })
   await w.clock.advance(300)
   expect(w.windows).toHaveLength(1)
-  expect(w.windows[0]!.argv).toEqual(['powershell', '-NoProfile', '-NonInteractive', '-STA', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encodedCommand(WINDOWS)])
+  expect(w.windows[0]!.argv).toEqual([POWERSHELL, '-NoProfile', '-NonInteractive', '-STA', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encodedCommand(WINDOWS)])
   expect(w.windows[0]!.env).toMatchObject({ QUICK_PEEK_FILE: '/project/app/src/app.ts', QUICK_PEEK_ASSEMBLY: EXE, QUICK_PEEK_TYPES: WINDOWS_TYPES, QUICK_PEEK_HINT: 'click: show in Explorer · Alt click: open' })
   expect(JSON.parse(w.windows[0]!.env.QUICK_PEEK_CODE!)).toMatchObject({ language: 'TypeScript', first: 1, mark: 5 })
   await ui.pointer({ type: 'leave', x: 3, y: 0, in: 'path:0:0' })
@@ -385,14 +387,28 @@ test('on Windows an exe the system will not start (AppLocker) has PowerShell run
   const ui = await reply($, `Listo: ${VIDEO}`)
   await ui.pointer({ type: 'enter', x: 0, y: 0, in: 'path:0:0' })
   await w.clock.advance(300)
-  expect(w.windows.map(opened => opened.argv[0])).toEqual([EXE, 'powershell'])
+  expect(w.windows.map(opened => opened.argv[0])).toEqual([EXE, POWERSHELL])
   expect(w.windows[1]!.isEnded).toBe(false)
   expect(w.logs).toContainEqual(expect.stringMatching(/the window's exe did not start \(This program is blocked by group policy\); PowerShell runs it/))
   await ui.pointer({ type: 'leave', x: 3, y: 0, in: 'path:0:0' })
   await w.clock.advance(300)
   await ui.pointer({ type: 'enter', x: 0, y: 0, in: 'path:0:0' })
   await w.clock.advance(300)
-  expect(w.windows.map(opened => opened.argv[0])).toEqual([EXE, 'powershell', 'powershell'])
+  expect(w.windows.map(opened => opened.argv[0])).toEqual([EXE, POWERSHELL, POWERSHELL])
+})
+
+test('on Windows PowerShell starts from the Windows folder the session names, by its full path: a powershell.exe in the project never runs', async ($, on) => {
+  const w = world(on, { ...WINDOWS_HOST, env: { ...WINDOWS_HOST.env, SystemRoot: 'D:\\WINDOWS\\' } })
+  await startSession($)
+  const ui = await reply($, 'Mira `src/app.ts`')
+  await ui.pointer({ type: 'enter', x: 0, y: 0, in: 'path:0:0' })
+  await w.clock.advance(300)
+  expect(w.windows[0]!.argv[0]).toBe('D:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe')
+  await ui.resize({ columns: 10, rows: 1, in: 'path:0:0' })
+  await ui.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'path:0:0' })
+  await ui.pointer({ type: 'up', x: 2, y: 0, button: 'left', in: 'path:0:0' })
+  await w.clock.settle()
+  expect(w.runs.at(-1)![0]).toBe('D:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe')
 })
 
 test('on Windows the window\'s command line, and the C# in QUICK_PEEK_TYPES, fit what Windows holds', async ($, on) => {

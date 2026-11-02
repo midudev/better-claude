@@ -15,12 +15,14 @@ const skip = process.platform !== 'win32' && 'the window is Windows\''
 const folder = mkdtempSync(join(tmpdir(), 'quick-peek-'))
 // The exe compiled here, fresh: the first run compiles it.
 const assembly = join(folder, WINDOWS_BUILD)
+// PowerShell by its full path, as the mod starts it.
+const POWERSHELL = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
 // What the program says when it lays a window out: its size, at 96 DPI, and its rows of text.
 const DRY = /^dry (\d+)x(\d+) (\d+) rows$/m
 
 /** The program as the mod runs it, told `env`, laying out instead of showing: through PowerShell, or the exe itself. */
 function run (env, { isDirect = false } = {}) {
-  const argv = isDirect ? [assembly] : ['powershell', '-NoProfile', '-NonInteractive', '-STA', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(WINDOWS, 'utf16le').toString('base64')]
+  const argv = isDirect ? [assembly] : [POWERSHELL, '-NoProfile', '-NonInteractive', '-STA', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(WINDOWS, 'utf16le').toString('base64')]
   const started = performance.now()
   const result = spawnSync(argv[0], argv.slice(1), { env: { ...process.env, QUICK_PEEK_ASSEMBLY: assembly, QUICK_PEEK_TYPES: WINDOWS_TYPES, QUICK_PEEK_DRY: '1', ...env }, encoding: 'utf8', timeout: 120_000 })
   return { said: result.stdout, status: result.status, ms: Math.round(performance.now() - started) }

@@ -58,6 +58,7 @@ const plans = new Map<string, { plan: Plan | null; at: number }>()
 const excerpts = new Map<string, Excerpt | null>()
 let platform: Promise<Platform> | undefined
 let wsl: Promise<boolean> | undefined
+let windowsRoot: Promise<string> | undefined
 // The system whose window a hover opens by the pointer (macOS, Windows); else none, and each path
 // carries a card the terminal reveals over it. The path the pointer is on, and the part it is on;
 // the window open; how many programs in a row ended without showing one. On Windows, where the
@@ -77,6 +78,12 @@ function platformOf ($: Engine) {
     return name === 'Darwin' ? 'macos' : name === 'Linux' ? 'linux' : 'other'
   })()
   return platform
+}
+
+/** How PowerShell runs `script`: by its full path, in the Windows folder the session names. */
+function powershellOf ($: Engine, script: string) {
+  windowsRoot ??= (async () => ((await $.env.get('SystemRoot')) || 'C:\\Windows').replace(/[\\/]+$/, ''))()
+  return windowsRoot.then(root => powershell(script, root))
 }
 
 /** Whether the session runs under WSL: Linux, on a Windows desktop, whose file manager shows the path. */
@@ -342,7 +349,7 @@ async function reveal ($: Engine, path: string, isOpening: boolean) {
   }
   if (system === 'windows') {
     const env = { QUICK_PEEK_FILE: path.replaceAll('/', '\\') }
-    await $.process.run(powershell(isOpening ? WINDOWS_OPEN : WINDOWS_REVEAL), { env }).catch(() => undefined)
+    await $.process.run(await powershellOf($, isOpening ? WINDOWS_OPEN : WINDOWS_REVEAL), { env }).catch(() => undefined)
     return
   }
   if (isOpening) {
@@ -391,7 +398,7 @@ async function openWindow ($: Engine, path: string, line: number | undefined) {
     const exe = await assemblyOf($)
     env.QUICK_PEEK_ASSEMBLY = exe
     isDirect = !isExeBlocked && !(!code && /\.pdf$/i.test(path)) && (await $.fs.exists(exe).catch(() => false))
-    argv = isDirect ? [exe] : powershell(WINDOWS)
+    argv = isDirect ? [exe] : await powershellOf($, WINDOWS)
     if (!isDirect) env.QUICK_PEEK_TYPES = WINDOWS_TYPES
   }
   let { isShown, said } = await show($, opening, argv, env)
@@ -399,7 +406,7 @@ async function openWindow ($: Engine, path: string, line: number | undefined) {
     // An exe the system will not start from the temp folder (AppLocker): PowerShell runs it from now on.
     isExeBlocked = true
     $.ui.log(`quick-peek: the window's exe did not start (${reasonOf(said)}); PowerShell runs it`, { to: 'debug' })
-    ;({ isShown, said } = await show($, opening, powershell(WINDOWS), { ...env, QUICK_PEEK_TYPES: WINDOWS_TYPES }))
+    ;({ isShown, said } = await show($, opening, await powershellOf($, WINDOWS), { ...env, QUICK_PEEK_TYPES: WINDOWS_TYPES }))
   }
   if (window === opening) window = undefined
   if (isShown) failures = 0
