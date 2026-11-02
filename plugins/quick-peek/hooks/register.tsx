@@ -62,13 +62,12 @@ let windowsRoot: Promise<string> | undefined
 // The system whose window a hover opens by the pointer (macOS, Windows); else none, and each path
 // carries a card the terminal reveals over it. The path the pointer is on, and the part it is on;
 // the window open; how many programs in a row ended without showing one. On Windows, where the
-// compiled window is, and whether the system refused to start it.
+// compiled window is.
 let windowing: 'macos' | 'windows' | undefined
 let hovered: { path: string; line: number | undefined; target: string } | undefined
 let window: { path: string; line: number | undefined; isOpen: boolean } | undefined
 let failures = 0
 let assembly: Promise<string> | undefined
-let isExeBlocked = false
 
 /** The system the session runs on, asked once. */
 function platformOf ($: Engine) {
@@ -365,9 +364,10 @@ async function reveal ($: Engine, path: string, isOpening: boolean) {
 /**
  * Shows `path` in a window by the pointer till `closeWindow`; a file of code or text, its lines
  * around `line`. The program says `.` ten times a second, so the loop wakes to see it was closed,
- * and leaving the loop ends the program. One that says it shows no window (`error: …`), on a path
- * that is there, or `FAILURES` in a row that end without showing one, say the system shows none:
- * from then on the terminal shows the cards.
+ * and leaving the loop ends the program. One that says it cannot show this path (`skip: …`)
+ * changes nothing: the next may show. One that says the system shows no window (`error: …`), one
+ * on macOS that ends without showing one, or on Windows `FAILURES` in a row, give the terminal
+ * the cards from then on.
  */
 async function openWindow ($: Engine, path: string, line: number | undefined) {
   closeWindow()
@@ -397,22 +397,27 @@ async function openWindow ($: Engine, path: string, line: number | undefined) {
     // where the exe does not start; it is told the C#, too long for a command line, in the environment.
     const exe = await assemblyOf($)
     env.QUICK_PEEK_ASSEMBLY = exe
-    isDirect = !isExeBlocked && !(!code && /\.pdf$/i.test(path)) && (await $.fs.exists(exe).catch(() => false))
+    isDirect = !(!code && /\.pdf$/i.test(path)) && (await $.fs.exists(exe).catch(() => false))
     argv = isDirect ? [exe] : await powershellOf($, WINDOWS)
     if (!isDirect) env.QUICK_PEEK_TYPES = WINDOWS_TYPES
   }
   let { isShown, said } = await show($, opening, argv, env)
-  if (isDirect && !isShown && opening.isOpen && !/^error: not there/m.test(said)) {
-    // An exe the system will not start from the temp folder (AppLocker): PowerShell runs it from now on.
-    isExeBlocked = true
+  if (isDirect && !isShown && opening.isOpen && !/^(skip|error):/m.test(said)) {
+    // An exe that did not start (AppLocker may refuse one in the temp folder; an antivirus may hold
+    // one it scans): PowerShell shows this window. Nothing is kept: the next hover tries the exe.
     $.ui.log(`quick-peek: the window's exe did not start (${reasonOf(said)}); PowerShell runs it`, { to: 'debug' })
     ;({ isShown, said } = await show($, opening, await powershellOf($, WINDOWS), { ...env, QUICK_PEEK_TYPES: WINDOWS_TYPES }))
   }
   if (window === opening) window = undefined
   if (isShown) failures = 0
-  if (isShown || !opening.isOpen || /^error: not there/m.test(said)) return
-  // A program that failed to start (many PowerShells at once) may start the next time.
-  if (!/^error/m.test(said) && ++failures < FAILURES) {
+  if (isShown || !opening.isOpen) return
+  if (/^skip:/m.test(said)) {
+    $.ui.log(`quick-peek: no window for ${path} (${reasonOf(said)})`, { to: 'debug' })
+    return
+  }
+  // On Windows a program that failed to start (many PowerShells at once) may start the next time;
+  // on macOS, osascript that failed fails again.
+  if (system === 'windows' && !/^error:/m.test(said) && ++failures < FAILURES) {
     $.ui.log(`quick-peek: no window (${reasonOf(said)}); the next hover tries again`, { to: 'debug' })
     return
   }
@@ -493,7 +498,6 @@ export const register: Register = (on, options) => {
     const hasWindow = options.window !== false && e.isInteractive && sshConnection === undefined && sshTty === undefined
     windowing = hasWindow && (system === 'macos' || system === 'windows') ? system : undefined
     failures = 0
-    isExeBlocked = false
     plans.clear()
     stats.clear()
     excerpts.clear()

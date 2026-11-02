@@ -22,7 +22,7 @@ const SCREEN = { columns: 60, rows: 40, isFullscreen: true }
  * Everything beneath the mod: the session, the files that are there, the programs it runs, the
  * window's program, and what the engine draws.
  */
-function world (on: On, { system = 'Darwin', env = {}, cwd = '/project/app', program = 'shows', isCompiled = false }: { system?: string; env?: Record<string, string>; cwd?: string; program?: 'shows' | 'fails' | 'crashes once' | 'exe blocked'; isCompiled?: boolean } = {}) {
+function world (on: On, { system = 'Darwin', env = {}, cwd = '/project/app', program = 'shows', isCompiled = false }: { system?: string; env?: Record<string, string>; cwd?: string; program?: 'shows' | 'fails' | 'crashes once' | 'exe blocked' | 'skips once' | 'osascript fails'; isCompiled?: boolean } = {}) {
   const clock = mock.clock(on, { now: 0 })
   mock.env(on, { HOME: '/Users/ana', ...env })
   const there: Record<string, 'file' | 'dir'> = { [VIDEO]: 'file', [FOLDER]: 'dir', [README]: 'file', [SOURCE]: 'file', [PDF]: 'file' }
@@ -60,6 +60,16 @@ function world (on: On, { system = 'Darwin', env = {}, cwd = '/project/app', pro
       // An exe the system will not start from the temp folder.
       if (program === 'exe blocked' && e.argv[0]!.endsWith(WINDOWS_BUILD)) {
         yield { stream: 'stderr' as const, text: 'This program is blocked by group policy.\n' }
+        return { value: { code: 1, signal: null } }
+      }
+      // A path the window cannot show, the first: Windows will not take a path that long.
+      if (program === 'skips once' && windows.length === 1) {
+        yield { stream: 'stdout' as const, text: 'skip: The specified path, file name, or both are too long.\n' }
+        return { value: { code: 0, signal: null } }
+      }
+      // osascript the system will not let show a window (privacy settings, a managed Mac).
+      if (program === 'osascript fails') {
+        yield { stream: 'stderr' as const, text: 'execution error: Not authorized to send Apple events to System Events. (-1743)\n' }
         return { value: { code: 1, signal: null } }
       }
       // PowerShell failing as it starts, many at once, says so in UTF-16.
@@ -243,8 +253,8 @@ test('a pointer crossing paths opens no window; resting on one opens its own', a
   expect(w.windows.map(opened => opened.env.QUICK_PEEK_FILE)).toEqual([README])
 })
 
-test('a program that fails to start, once, leaves the window on: the next hover opens it', async ($, on) => {
-  const w = world(on, { program: 'crashes once' })
+test('on Windows a program that fails to start, once, leaves the window on: the next hover opens it', async ($, on) => {
+  const w = world(on, { ...WINDOWS_HOST, program: 'crashes once' })
   await startSession($)
   const ui = await reply($, `Listo: ${VIDEO}`)
   await ui.pointer({ type: 'enter', x: 0, y: 0, in: 'path:0:0' })
@@ -257,6 +267,19 @@ test('a program that fails to start, once, leaves the window on: the next hover 
   expect(w.windows).toHaveLength(2)
   expect(w.windows[1]!.isEnded).toBe(false)
   expect(await ui.find({ key: 'card:0:0' })).toBeUndefined()
+})
+
+test('on macOS an osascript the system will not let show a window gives the terminal the cards at the first hover', async ($, on) => {
+  const w = world(on, { program: 'osascript fails' })
+  await startSession($)
+  const first = await reply($, `Listo: ${VIDEO}`)
+  await first.pointer({ type: 'enter', x: 0, y: 0, in: 'path:0:0' })
+  await w.clock.advance(300)
+  expect(w.windows).toHaveLength(1)
+  expect(w.logs).toContainEqual(expect.stringMatching(/no window \(execution error: Not authorized.*\); the terminal shows the cards/))
+  await first.unmount()
+  const again = await reply($, `Listo: ${VIDEO}`)
+  expect(await again.find({ key: 'card:0:0' })).toBeDefined()
 })
 
 test('a file of code shows its lines in the window, around the line its path names', async ($, on) => {
@@ -381,7 +404,7 @@ test('on Windows, once compiled, a hover starts the exe itself, no PowerShell; a
   expect(w.windows[1]!.env).toMatchObject({ QUICK_PEEK_FILE: PDF, QUICK_PEEK_ASSEMBLY: EXE, QUICK_PEEK_TYPES: WINDOWS_TYPES })
 })
 
-test('on Windows an exe the system will not start (AppLocker) has PowerShell run the window, then and from then on', async ($, on) => {
+test('on Windows an exe that does not start (AppLocker) has PowerShell show that window; the next hover tries the exe again', async ($, on) => {
   const w = world(on, { ...WINDOWS_HOST, isCompiled: true, program: 'exe blocked' })
   await startSession($)
   const ui = await reply($, `Listo: ${VIDEO}`)
@@ -394,7 +417,25 @@ test('on Windows an exe the system will not start (AppLocker) has PowerShell run
   await w.clock.advance(300)
   await ui.pointer({ type: 'enter', x: 0, y: 0, in: 'path:0:0' })
   await w.clock.advance(300)
-  expect(w.windows.map(opened => opened.argv[0])).toEqual([EXE, POWERSHELL, POWERSHELL])
+  expect(w.windows.map(opened => opened.argv[0])).toEqual([EXE, POWERSHELL, EXE, POWERSHELL])
+  expect(w.windows[3]!.isEnded).toBe(false)
+})
+
+test('on Windows a path the window cannot show (too long) is skipped: no PowerShell, no cards, and the next hover opens the window', async ($, on) => {
+  const w = world(on, { ...WINDOWS_HOST, isCompiled: true, program: 'skips once' })
+  await startSession($)
+  const ui = await reply($, `Listo: ${VIDEO}`)
+  await ui.pointer({ type: 'enter', x: 0, y: 0, in: 'path:0:0' })
+  await w.clock.advance(300)
+  expect(w.windows.map(opened => opened.argv[0])).toEqual([EXE])
+  expect(w.logs).toContainEqual(`quick-peek: no window for ${VIDEO} (skip: The specified path, file name, or both are too long)`)
+  await ui.pointer({ type: 'leave', x: 3, y: 0, in: 'path:0:0' })
+  await w.clock.advance(300)
+  await ui.pointer({ type: 'enter', x: 0, y: 0, in: 'path:0:0' })
+  await w.clock.advance(300)
+  expect(w.windows.map(opened => opened.argv[0])).toEqual([EXE, EXE])
+  expect(w.windows[1]!.isEnded).toBe(false)
+  expect(await ui.find({ key: 'card:0:0' })).toBeUndefined()
 })
 
 test('on Windows PowerShell starts from the Windows folder the session names, by its full path: a powershell.exe in the project never runs', async ($, on) => {

@@ -3,9 +3,10 @@
 // environment (QUICK_PEEK_FILE, the path; QUICK_PEEK_LIFE, how many seconds at most it stays;
 // QUICK_PEEK_HINT, the line that says what a click does; QUICK_PEEK_CODE, for a file of code or
 // text, the lines it shows as JSON, an `Excerpt` without its source). It writes `shown` once the
-// window is up, or a line starting `error`, then a `.` every tenth of a second, so the one reading
-// it is woken to end it, and it ends when nobody reads. The window never takes the focus or the
-// pointer: the terminal keeps both.
+// window is up, then a `.` every tenth of a second, so the one reading it is woken to end it, and
+// it ends when nobody reads. Else a line saying why: `skip: …`, this path it cannot show (gone, a
+// path too long), or `error: …`, this system shows no window. The window never takes the focus or
+// the pointer: the terminal keeps both.
 
 /**
  * macOS: JavaScript for Automation drawing an AppKit panel. A file of code or text shows its
@@ -28,7 +29,7 @@ function run () {
   const path = read('QUICK_PEEK_FILE')
   const files = $.NSFileManager.defaultManager
   const isFolder = Ref()
-  if (!files.fileExistsAtPathIsDirectory(path, isFolder)) { say('error: not there'); return }
+  if (!files.fileExistsAtPathIsDirectory(path, isFolder)) { say('skip: not there'); return }
   const folder = !!isFolder[0]
   // An accessory app: no Dock icon, never the active one.
   $.NSApplication.sharedApplication.setActivationPolicy(1)
@@ -317,7 +318,15 @@ public class QuickPeekWindow : Form {
   // Shows path till it ends; page, a PDF's first page, is its picture.
   public static int Run (string path, Image page) {
     int largest = Prepare();
-    QuickPeekWindow window = new QuickPeekWindow(path, page, largest);
+    // What goes wrong laying out this path (gone as it is read, a path too long) is this path's:
+    // the next one may show.
+    QuickPeekWindow window;
+    try {
+      window = new QuickPeekWindow(path, page, largest);
+    } catch (Exception error) {
+      Say("skip: " + error.Message);
+      return 0;
+    }
     if (Environment.GetEnvironmentVariable("QUICK_PEEK_DRY") == "1") {
       Say("dry " + (int)Math.Round(window.Width / scale) + "x" + (int)Math.Round(window.Height / scale) + " " + window.rows.Count + " rows");
       return 0;
@@ -649,12 +658,19 @@ public class QuickPeekWindow : Form {
 public static class QuickPeekMain {
   [STAThread]
   public static int Main () {
+    string path;
     try {
-      string path = Path.GetFullPath(Environment.GetEnvironmentVariable("QUICK_PEEK_FILE"));
-      if (!File.Exists(path) && !Directory.Exists(path)) {
-        Console.Out.WriteLine("error: not there");
-        return 0;
-      }
+      path = Path.GetFullPath(Environment.GetEnvironmentVariable("QUICK_PEEK_FILE"));
+    } catch (Exception error) {
+      // A path it cannot take (too long, a character Windows refuses) is this path's.
+      Console.Out.WriteLine("skip: " + error.Message);
+      return 0;
+    }
+    if (!File.Exists(path) && !Directory.Exists(path)) {
+      Console.Out.WriteLine("skip: not there");
+      return 0;
+    }
+    try {
       return QuickPeekWindow.Run(path, null);
     } catch (Exception error) {
       Console.Out.WriteLine("error: " + error.Message);
@@ -692,8 +708,9 @@ try {
     }
   }
   $null = [Reflection.Assembly]::LoadFrom($assembly)
-  $path = [IO.Path]::GetFullPath($env:QUICK_PEEK_FILE)
-  if (-not (Test-Path -LiteralPath $path)) { [Console]::Out.WriteLine('error: not there'); exit 0 }
+  # A path it cannot take (too long, a character Windows refuses) is this path's, as one not there.
+  try { $path = [IO.Path]::GetFullPath($env:QUICK_PEEK_FILE) } catch { [Console]::Out.WriteLine('skip: ' + $_.Exception.Message); exit 0 }
+  if (-not (Test-Path -LiteralPath $path)) { [Console]::Out.WriteLine('skip: not there'); exit 0 }
   $page = $null
   if (-not $env:QUICK_PEEK_CODE -and $path -match '\.pdf$') {
     try {

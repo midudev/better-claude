@@ -69,7 +69,7 @@ test('compiles the window and lays out a file: its picture, name, details and fo
 test('the exe on its own says a path that is not there', { skip }, () => {
   const { said, status } = run({ QUICK_PEEK_FILE: join(folder, 'missing.txt') }, { isDirect: true })
   assert.equal(status, 0)
-  assert.match(said, /^error: not there\r?$/m)
+  assert.match(said, /^skip: not there\r?$/m)
 })
 
 test('lays out a file of code: its lines on a plate at least as wide as the text under it', { skip }, () => {
@@ -102,8 +102,14 @@ test('renders a PDF\'s first page: a portrait page makes a window taller than wi
   assert.ok(height > width, said)
 })
 
+test('the exe on its own skips a path too long for it: that path, not the system', { skip }, () => {
+  const { said, status } = run({ QUICK_PEEK_FILE: join(folder, 'a'.repeat(300), 'b.txt') }, { isDirect: true })
+  assert.equal(status, 0, said)
+  assert.match(said, /^skip: /m)
+})
+
 test('says a path that is not there', { skip }, () => {
   const { said, status } = run({ QUICK_PEEK_FILE: join(folder, 'missing.txt') })
   assert.equal(status, 0)
-  assert.match(said, /^error: not there$/m)
+  assert.match(said, /^skip: not there$/m)
 })
