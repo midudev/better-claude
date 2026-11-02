@@ -95,6 +95,9 @@ test('finds absolute, home, relative and bare paths, and cuts what a sentence ad
   expect(resolve('~\\notas.md', 'C:\\project', '\\\\servidor\\usuarios\\ana')).toBe('//servidor/usuarios/ana/notas.md')
   expect(resolve('~/notas.md', 'C:\\project', '\\\\servidor\\usuarios\\ana')).toBe('//servidor/usuarios/ana/notas.md')
   expect(resolve('src/app.ts', '\\\\servidor\\proyectos\\app', 'C:\\Users\\ana')).toBe('//servidor/proyectos/app/src/app.ts')
+  // An absolute UNC target keeps its share when the working folder is a Windows path.
+  expect(resolve('//servidor/proyectos/x.ts', 'C:\\project', 'C:\\Users\\ana')).toBe('//servidor/proyectos/x.ts')
+  expect(resolve('\\\\servidor\\proyectos\\..\\x.ts', 'C:\\project', undefined)).toBe('//servidor/proyectos/x.ts')
   // On POSIX a backslash belongs to the name, and a leading `//` is not a share.
   expect(resolve('//usr/bin/x', '/project', '/Users/ana')).toBe('/usr/bin/x')
   expect(resolve('~/foo\\bar.txt', '/project', '/Users/ana')).toBe('/Users/ana/foo\\bar.txt')

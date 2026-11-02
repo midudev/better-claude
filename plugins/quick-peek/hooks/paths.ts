@@ -72,8 +72,11 @@ export function resolve (target: string, cwd: string, home: string | undefined) 
   const ROOT = /^(?:[A-Za-z]:|[\\/]{2}[^\\/]+[\\/][^\\/]+)(?=[\\/]|$)/
   const slashedBase = (p: string) => (ROOT.test(p) ? p.replaceAll('\\', '/') : p)
   const rootOf = (p: string) => ROOT.exec(p)?.[0].replaceAll('\\', '/') ?? ''
-  let path = DRIVE.test(target) ? target.replaceAll('\\', '/') : target
-  let root = DRIVE.test(target) ? target.slice(0, 2) : ''
+  // A UNC target keeps its share only where the working folder or home is a Windows path.
+  const windowsContext = ROOT.test(cwd) || (home !== undefined && ROOT.test(home))
+  const isUnc = windowsContext && !DRIVE.test(target) && ROOT.test(target)
+  let path = DRIVE.test(target) || isUnc ? target.replaceAll('\\', '/') : target
+  let root = DRIVE.test(target) ? target.slice(0, 2) : isUnc ? rootOf(target) : ''
   // A backslash is a separator only where home is a Windows path: on POSIX it is part of a name.
   const isWindowsHome = home !== undefined && ROOT.test(home)
   if (path === '~' || path.startsWith('~/') || (isWindowsHome && path.startsWith('~\\'))) {
