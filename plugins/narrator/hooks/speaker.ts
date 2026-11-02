@@ -145,7 +145,9 @@ $script:isSpeaking = $false
 
 # A person's own speaker. A child PowerShell runs it after taking the shared Windows line. Native
 # programs get the narration as their last argument, read from the environment without putting its
-# contents in code. Batch files and cmd.exe only get NARRATOR_TEXT: cmd.exe reparses quotes and
+# contents in code. Straight double quotes become typographic ones because Windows PowerShell 5.1
+# cannot preserve embedded quotes for native arguments. Batch files and cmd.exe only get
+# NARRATOR_TEXT: cmd.exe reparses quotes and
 # metacharacters in arguments, so no arbitrary narration is ever placed on its command line. The
 # command's output is hidden so it cannot be mistaken for this script's voice protocol. While it
 # runs this parent keeps ticking, so its reader can end the whole process tree at once. A failure
@@ -164,28 +166,45 @@ function Speak-Command {
   $resolvedProgram = if ($resolved -and $resolved.Path) { $resolved.Path } else { $program }
   $leaf = [IO.Path]::GetFileName($resolvedProgram).ToLowerInvariant()
   $isBatch = [IO.Path]::GetExtension($leaf) -in @('.cmd', '.bat') -or $leaf -in @('cmd', 'cmd.exe')
-  $textArgument = if ($isBatch) { '' } else { ' $env:NARRATOR_TEXT' }
-  $expression = '$global:LASTEXITCODE = $null; & ' + $speaker + $textArgument + ' *> $null; $worked = $?; if (-not $worked) { exit 1 }; if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) { exit $LASTEXITCODE }'
+  $textArgument = if ($isBatch) { '' } else {
+    $env:NARRATOR_ARGUMENT = $text.Replace([char]34, [char]0x201D)
+    ' $env:NARRATOR_ARGUMENT'
+  }
+  $expression = '$global:LASTEXITCODE = $null; try { & ' + $speaker + $textArgument + '; if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) { exit $LASTEXITCODE } } catch { exit 1 }'
   $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($expression))
   $process = $null
+  $watchdog = $null
+  $worked = $false
   try {
     $hostPath = (Get-Process -Id $PID).Path
     $process = Start-Process -FilePath $hostPath -ArgumentList @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encoded) -WindowStyle Hidden -PassThru
+    # If this supervisor is killed before its finally block runs, a separate watchdog still ends
+    # the speak command's whole tree instead of leaving it talking over the next narration.
+    $parentPid = $PID
+    $childPid = $process.Id
+    $watchExpression = 'while (Get-Process -Id ' + $parentPid + ' -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 100 }; & taskkill.exe /PID ' + $childPid + ' /T /F *> $null'
+    $watchEncoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($watchExpression))
+    $watchdog = Start-Process -FilePath $hostPath -ArgumentList @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $watchEncoded) -WindowStyle Hidden -PassThru
     Say "voice $speaker"
     while (-not $process.HasExited) {
       Start-Sleep -Milliseconds 100
       $process.Refresh()
       if (-not $process.HasExited) { Tick }
     }
-    return $process.ExitCode -eq 0
+    $worked = $process.ExitCode -eq 0
   } catch {}
   finally {
+    if ($watchdog) {
+      try { if (-not $watchdog.HasExited) { $watchdog.Kill() } } catch {}
+      $watchdog.Dispose()
+    }
     if ($process -and -not $process.HasExited) {
       & taskkill.exe /PID $process.Id /T /F *> $null
     }
     if ($process) { $process.Dispose() }
   }
-  return $false
+  if (-not $worked) { Say "fallback $speaker" }
+  return $worked
 }
 
 function Speak-OneCore {

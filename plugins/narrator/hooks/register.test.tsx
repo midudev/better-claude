@@ -46,6 +46,7 @@ function world (on: On, { system = 'Darwin', env = {}, reply = 'es\nHe añadido 
   const systems: string[] = []
   const efforts: unknown[] = []
   const toasts: string[] = []
+  const logs: string[] = []
   const commandHints: string[] = []
   const runs: string[][] = []
   let heard: () => void = () => undefined
@@ -74,7 +75,10 @@ function world (on: On, { system = 'Darwin', env = {}, reply = 'es\nHe añadido 
     toasts.push(e.text)
     return { value: undefined }
   })
-  on('ui.log', () => ({ value: undefined }))
+  on('ui.log', ($, e) => {
+    logs.push(e.text)
+    return { value: undefined }
+  })
   on('tool.call', () => ({ result: 'ok' }))
   on('model.complete', ($, e) => {
     prompts.push(e.prompt)
@@ -102,7 +106,7 @@ function world (on: On, { system = 'Darwin', env = {}, reply = 'es\nHe añadido 
         return { value: { code: 1, signal: null } }
       }
       if (speaker === 'falls back') {
-        yield { stream: 'stdout' as const, text: 'voice my-voice\nvoice Luisa\n' }
+        yield { stream: 'stdout' as const, text: 'voice my-voice\nfallback my-voice\nvoice Luisa\n' }
         heard()
         return { value: { code: 0, signal: null } }
       }
@@ -128,7 +132,7 @@ function world (on: On, { system = 'Darwin', env = {}, reply = 'es\nHe añadido 
   const settled = async () => {
     for (let i = 0; i < 20; i++) await clock.advance(0)
   }
-  return { clock, store: kept, spoken, said, prompts, systems, efforts, toasts, commandHints, runs, nextSpeech, settled, setRecap: (text: string) => { currentRecap = text } }
+  return { clock, store: kept, spoken, said, prompts, systems, efforts, toasts, logs, commandHints, runs, nextSpeech, settled, setRecap: (text: string) => { currentRecap = text } }
 }
 
 /** An answer too long to be read as it is: the narrator has a model write what to say. */
@@ -553,6 +557,7 @@ test('when a Windows speak command fails, the system fallback is the voice that 
   const result = await narrator($, 'test')
   expect(result.text).toBe('Narrator: previewed Luisa.')
   expect(w.spoken[0]!.env.NARRATOR_SPEAKER).toBe('my-voice')
+  expect(w.logs).toContain('narrator: my-voice failed; spoke with Luisa')
 })
 
 test('stopping a Windows speak command kills its whole process tree', { options: { command: 'my-voice' } }, async ($, on) => {
@@ -1099,9 +1104,13 @@ test('a new prompt cuts /narrator read short', async ($, on) => {
 
 test('the Windows speaker never interpolates narration into command source', () => {
   expect(WINDOWS).not.toContain('$quotedText')
-  expect(WINDOWS).toContain("' $env:NARRATOR_TEXT'")
+  expect(WINDOWS).toContain("' $env:NARRATOR_ARGUMENT'")
+  expect(WINDOWS).toContain('$text.Replace([char]34, [char]0x201D)')
+  expect(WINDOWS).not.toContain("*> $null; $worked = $?")
   expect(WINDOWS).toContain('Get-Command -Name $program')
   expect(WINDOWS).toContain('$resolved.Path')
   expect(WINDOWS).toContain("@('.cmd', '.bat')")
   expect(WINDOWS).toContain("@('cmd', 'cmd.exe')")
+  expect(WINDOWS).toContain("'while (Get-Process -Id ' + $parentPid")
+  expect(WINDOWS).toContain("' /T /F *> $null'")
 })

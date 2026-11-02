@@ -347,6 +347,7 @@ async function play ($: EngineInterface, narration: Narration, command: Command)
   // A custom Windows command can fail after naming itself, then the system synthesizer names the
   // voice it falls back to. The last voice line is therefore the one that actually finished.
   const voice = [...said.matchAll(/^voice (.+?)\r?$/gm)].at(-1)?.[1]
+  const fallback = [...said.matchAll(/^fallback (.+?)\r?$/gm)].at(-1)?.[1]
   // Behind others for too long: the line dropped it, and nothing else should say it now.
   if (/^skipped\r?$/m.test(said)) {
     $.ui.log('narrator: not said, the line of narrations from other sessions was too long', { to: 'debug' })
@@ -360,7 +361,12 @@ async function play ($: EngineInterface, narration: Narration, command: Command)
     await $.process.run(['taskkill.exe', '/PID', pid, '/T', '/F']).catch(() => undefined)
   }
   if (!narration.isActive) return undefined
-  $.ui.log(failure ? `narrator: ${command.program}: ${failure}` : `narrator: spoke with ${voice}`, { to: 'debug' })
+  const report = failure
+    ? `narrator: ${command.program}: ${failure}`
+    : fallback
+      ? `narrator: ${fallback} failed; spoke with ${voice}`
+      : `narrator: spoke with ${voice}`
+  $.ui.log(report, { to: 'debug' })
   return failure === '' ? { voice: voice!, isFallback: command.isFallback === true || /^no voice /m.test(said) } : undefined
 }
 
