@@ -377,7 +377,7 @@ async function openWindow ($: Engine, path: string, line: number | undefined) {
   window = opening
   // Only once the pointer rests on the path: one program, not one for each path it crosses.
   await $.clock.sleep(OPEN_MS)
-  if (!opening.isOpen || hovered?.path !== path || hovered.line !== line) {
+  if (!opening.isOpen || !isOn(path, line)) {
     if (window === opening) closeWindow()
     return
   }
@@ -452,6 +452,14 @@ function closeWindow () {
 }
 
 /**
+ * Whether the pointer is on `path` naming `line`: asked as a function, as it may move while the
+ * caller waits.
+ */
+function isOn (path: string, line: number | undefined) {
+  return hovered?.path === path && hovered.line === line
+}
+
+/**
  * The pointer came onto a part of `path` naming `line` (`target`, the part's address): its preview
  * opens, unless it is open: one about to close, as the pointer had left, stays.
  */
@@ -472,7 +480,7 @@ async function off ($: Engine, target: string) {
   const closing = window
   if (!closing) return
   await $.clock.sleep(LEAVE_MS)
-  if (hovered?.path === closing.path && hovered.line === closing.line) return
+  if (isOn(closing.path, closing.line)) return
   closing.isOpen = false
   if (window === closing) window = undefined
 }
