@@ -176,14 +176,6 @@ test('after a `cd` into a folder of the project, a relative path leads from ther
   expect(await ui.find({ key: 'path:2:0' })).toMatchObject({ props: { props: { label: 'README.md', path: README } } })
 })
 
-test('on Windows a relative path and one from home lead from the session\'s `C:\\` folders', async ($, on) => {
-  world(on, { system: '', cwd: 'C:\\project\\app', env: { OS: 'Windows_NT', HOME: 'C:\\Users\\ana' } })
-  await startSession($)
-  const ui = await reply($, 'Mira `src/app.ts:5` y ~/videos/borrador.mp4')
-  expect(await ui.find({ key: 'path:0:0' })).toMatchObject({ props: { props: { label: 'src/app.ts:5', path: 'C:/project/app/src/app.ts', line: 5 } } })
-  expect(await ui.find({ key: 'path:1:0' })).toMatchObject({ props: { props: { label: '~/videos/borrador.mp4', path: 'C:/Users/ana/videos/borrador.mp4' } } })
-})
-
 test('a reply naming no path that is there is the engine\'s, and so is one off fullscreen', async ($, on) => {
   world(on)
   await startSession($)
@@ -345,8 +337,10 @@ test('under WSL a click selects the path in Explorer', async ($, on) => {
   expect(w.runs).toContainEqual(['explorer.exe', '/select,C:\\Users\\ana\\videos\\borrador.mp4'])
 })
 
-// A Windows session: its folders are `C:\…`, and no `uname` answers.
-const WINDOWS_HOST = { system: '', cwd: 'C:\\project\\app', env: { OS: 'Windows_NT', HOME: 'C:\\Users\\ana', TEMP: 'C:\\Users\\ana\\AppData\\Local\\Temp' } }
+// A Windows session: `OS` says so and no `uname` answers. Its folders are written `/…` here: on a
+// Linux host the engine reads `C:/…` as a relative path and hands the hook another one, so how a
+// path keeps its drive is tested where no engine stands between, in `resolve`'s test.
+const WINDOWS_HOST = { system: '', cwd: '/project/app', env: { OS: 'Windows_NT', HOME: '/Users/ana', TEMP: 'C:\\Users\\ana\\AppData\\Local\\Temp' } }
 // The compiled window, where the mod looks for it.
 const EXE = `C:\\Users\\ana\\AppData\\Local\\Temp\\${WINDOWS_BUILD}`
 // The longest command line Windows starts, and the longest variable it holds, in characters.
@@ -360,7 +354,7 @@ test('on Windows the first hover has PowerShell compile the window into an exe, 
   await w.clock.advance(300)
   expect(w.windows).toHaveLength(1)
   expect(w.windows[0]!.argv).toEqual(['powershell', '-NoProfile', '-NonInteractive', '-STA', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encodedCommand(WINDOWS)])
-  expect(w.windows[0]!.env).toMatchObject({ QUICK_PEEK_FILE: 'C:/project/app/src/app.ts', QUICK_PEEK_ASSEMBLY: EXE, QUICK_PEEK_TYPES: WINDOWS_TYPES, QUICK_PEEK_HINT: 'click: show in Explorer · Alt click: open' })
+  expect(w.windows[0]!.env).toMatchObject({ QUICK_PEEK_FILE: '/project/app/src/app.ts', QUICK_PEEK_ASSEMBLY: EXE, QUICK_PEEK_TYPES: WINDOWS_TYPES, QUICK_PEEK_HINT: 'click: show in Explorer · Alt click: open' })
   expect(JSON.parse(w.windows[0]!.env.QUICK_PEEK_CODE!)).toMatchObject({ language: 'TypeScript', first: 1, mark: 5 })
   await ui.pointer({ type: 'leave', x: 3, y: 0, in: 'path:0:0' })
   await w.clock.advance(300)
@@ -374,7 +368,7 @@ test('on Windows, once compiled, a hover starts the exe itself, no PowerShell; a
   await ui.pointer({ type: 'enter', x: 0, y: 0, in: 'path:0:0' })
   await w.clock.advance(300)
   expect(w.windows[0]!.argv).toEqual([EXE])
-  expect(w.windows[0]!.env).toMatchObject({ QUICK_PEEK_FILE: 'C:/project/app/src/app.ts', QUICK_PEEK_ASSEMBLY: EXE })
+  expect(w.windows[0]!.env).toMatchObject({ QUICK_PEEK_FILE: '/project/app/src/app.ts', QUICK_PEEK_ASSEMBLY: EXE })
   expect(w.windows[0]!.env.QUICK_PEEK_TYPES).toBeUndefined()
   await ui.pointer({ type: 'leave', x: 3, y: 0, in: 'path:0:0' })
   await w.clock.advance(300)
@@ -456,11 +450,11 @@ test('on Windows a click selects the path in Explorer, an alt-click opens it: th
   await ui.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'path:0:0' })
   await ui.pointer({ type: 'up', x: 2, y: 0, button: 'left', in: 'path:0:0' })
   await w.clock.settle()
-  expect(w.ran(powershell(WINDOWS_REVEAL))).toEqual({ QUICK_PEEK_FILE: 'C:\\project\\app\\src\\app.ts' })
+  expect(w.ran(powershell(WINDOWS_REVEAL))).toEqual({ QUICK_PEEK_FILE: '\\project\\app\\src\\app.ts' })
   await ui.pointer({ type: 'down', x: 2, y: 0, button: 'left', alt: true, in: 'path:0:0' })
   await ui.pointer({ type: 'up', x: 2, y: 0, button: 'left', alt: true, in: 'path:0:0' })
   await w.clock.settle()
-  expect(w.ran(powershell(WINDOWS_OPEN))).toEqual({ QUICK_PEEK_FILE: 'C:\\project\\app\\src\\app.ts' })
+  expect(w.ran(powershell(WINDOWS_OPEN))).toEqual({ QUICK_PEEK_FILE: '\\project\\app\\src\\app.ts' })
   // Started straight, Explorer would open its window hidden.
   expect(w.runs.some(argv => argv[0] === 'explorer')).toBe(false)
 })
