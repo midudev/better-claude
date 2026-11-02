@@ -42,6 +42,14 @@ test('the session total adds up across turns', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: '  ·  session ↑ 2.0k  ↓ 400' })).toBeDefined()
 })
 
+test('millions of tokens read as M, not as thousands of k', async ($, on) => {
+  world(on)
+  await turnEnd($, { ...USAGE, input_tokens: 1_234_567, output_tokens: 999_960 })
+  const ui = await hint($)
+  expect(await ui.find({ type: 'Text', text: ' 1.2M  ' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' 1.0M  ' })).toBeDefined()
+})
+
 test('before any turn the hint line is left alone', async ($, on) => {
   world(on)
   await turnEnd($)

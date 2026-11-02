@@ -7,7 +7,8 @@ const ZERO: Tokens = { input: 0, output: 0, cached: 0 }
 const turn = atom({ plugin: 'token-meter', key: 'turn' } as const, null as Tokens | null)
 const session = atom({ plugin: 'token-meter', key: 'session' } as const, ZERO)
 
-const short = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`)
+// From 999_950 on, k would round to 1000.0k
+const short = (n: number) => (n >= 999_950 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`)
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
