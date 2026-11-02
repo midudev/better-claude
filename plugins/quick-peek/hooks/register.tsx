@@ -70,6 +70,8 @@ let windowing: 'macos' | 'windows' | undefined
 let hovered: { path: string; line: number | undefined; target: string } | undefined
 let window: { path: string; line: number | undefined; isOpen: boolean } | undefined
 let failures = 0
+// How many times the pointer left a path: only the last leave may close the window.
+let leaves = 0
 let assembly: Promise<string | undefined> | undefined
 
 /** The system the session runs on, asked once. */
@@ -517,8 +519,10 @@ async function off ($: Engine, target: string) {
   hovered = undefined
   const closing = window
   if (!closing) return
+  const leave = ++leaves
   await $.clock.sleep(LEAVE_MS)
-  if (isOn(closing.path, closing.line)) return
+  // A later leave decides: the pointer came back and left again, and may come back in its time.
+  if (leave !== leaves || isOn(closing.path, closing.line)) return
   closing.isOpen = false
   if (window === closing) window = undefined
 }

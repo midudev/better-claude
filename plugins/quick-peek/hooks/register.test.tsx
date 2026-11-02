@@ -249,6 +249,27 @@ test('a pointer that leaves and comes straight back keeps the one window, which 
   expect(w.windows[0]!.isEnded).toBe(true)
 })
 
+test('a pointer that leaves, comes back and leaves again keeps the one window: only the last leave may close it', async ($, on) => {
+  const w = world(on)
+  await startSession($)
+  const ui = await reply($, `Listo: ${VIDEO}`)
+  await ui.pointer({ type: 'enter', x: 0, y: 0, in: 'path:0:0' })
+  await w.clock.advance(300)
+  expect(w.windows).toHaveLength(1)
+  // It leaves (that leave would close the window 200 ms on), comes back, and leaves again.
+  await ui.pointer({ type: 'leave', x: 3, y: 0, in: 'path:0:0' })
+  await w.clock.advance(100)
+  await ui.pointer({ type: 'enter', x: 1, y: 0, in: 'path:0:0' })
+  await w.clock.advance(50)
+  await ui.pointer({ type: 'leave', x: 3, y: 0, in: 'path:0:0' })
+  // The first leave's 200 ms pass while it is away; it comes back within the second's.
+  await w.clock.advance(100)
+  await ui.pointer({ type: 'enter', x: 1, y: 0, in: 'path:0:0' })
+  await w.clock.advance(400)
+  expect(w.windows).toHaveLength(1)
+  expect(w.windows[0]!.isEnded).toBe(false)
+})
+
 test('a pointer crossing paths opens no window; resting on one opens its own', async ($, on) => {
   const w = world(on)
   await startSession($)
