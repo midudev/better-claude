@@ -21,7 +21,7 @@
     "window": {
       "type": "boolean",
       "title": "Preview in a window",
-      "description": "On macOS, show the preview in a small window by the pointer: the file's Quick Look thumbnail, its kind, size and age. Off, the terminal shows a one-line card over the path.",
+      "description": "On macOS and Windows, show the preview in a small window by the pointer: the file's thumbnail, its kind, size and age (its date, on Windows). Off, the terminal shows a one-line card over the path.",
       "default": true
     }
   }

@@ -23,7 +23,7 @@
   },
   "scripts": {
     "test": "npm run test:node && npm run test:mod",
-    "test:node": "node --test \"plugins/after/test/*.test.js\" \"plugins/time-machine/test/*.test.js\"",
+    "test:node": "node --test \"plugins/after/test/*.test.js\" \"plugins/time-machine/test/*.test.js\" \"plugins/quick-peek/test/*.test.js\"",
     "test:mod": "claude plugin test ./plugins/after && claude plugin test ./plugins/use-haiku && claude plugin test ./plugins/think-hard && claude plugin test ./plugins/token-meter && claude plugin test ./plugins/sub-meter && claude plugin test ./plugins/context-meter && claude plugin test ./plugins/image-preview && claude plugin test ./plugins/quick-peek && claude plugin test ./plugins/narrator && claude plugin test ./plugins/time-machine",
     "test:watch": "node --test --watch \"plugins/after/test/*.test.js\"",
     "typecheck": "npx -y -p typescript@7 tsc -p plugins/after",
