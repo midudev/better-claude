@@ -216,19 +216,58 @@ test('without a window, each path carries a card the terminal reveals over it', 
   await startSession($)
   const ui = await reply($, `Listo: ${VIDEO}`)
   expect(await ui.find({ key: 'card:0:0' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /borrador\.mp4 · 12\.0 MB · .* ago · click: show in folder/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^ 12\.0 MB · \d+ (s|min|h|d) ago $/ })).toBeDefined()
+  // The card is hidden till the pointer is on the path, sits on the row above it, and holds that one line.
+  const [box] = (await ui.findAll({ type: 'Box' })).filter(found => found.props.position === 'absolute')
+  expect(box).toMatchObject({ props: { top: -1, display: 'none' } })
+  expect(box!.children).toHaveLength(1)
   await ui.pointer({ type: 'enter', x: 0, y: 0, in: 'path:0:0' })
   await w.clock.advance(100)
   expect(w.windows).toHaveLength(0)
 })
 
-test('without a window, the card of a file of code shows its first lines, coloured by the engine', cards, async ($, on) => {
+/** Where the card of the first path sits: its column in the row, and how wide it is. */
+const cardAt = async (ui: Awaited<ReturnType<typeof reply>>) => {
+  const [box] = (await ui.findAll({ type: 'Box' })).filter(found => found.props.position === 'absolute')
+  const line = await ui.find({ type: 'Text', text: /ago $/ })
+  return { left: box!.props.left as number, width: line!.text!.length }
+}
+
+test('the card ends where its path does, not over its start, where a terminal says a click opens the file', cards, async ($, on) => {
+  world(on)
+  await startSession($)
+  const { left, width } = await cardAt(await reply($, `Listo: ${VIDEO}`))
+  expect(left).toBe(VIDEO.length - width)
+})
+
+test('the card of a path shorter than it starts where the path does', cards, async ($, on) => {
+  world(on)
+  await startSession($)
+  expect((await cardAt(await reply($, 'Mira README.md'))).left).toBe(0)
+})
+
+test('the card ends inside the reply: a path by its right edge moves it left', cards, async ($, on) => {
+  world(on)
+  await startSession($)
+  const at = 47
+  const { left, width } = await cardAt(await reply($, `${'x'.repeat(at - 1)} README.md`))
+  // The reply is 58 columns wide: the screen's 60, less the bullet's two.
+  expect(at + left + width).toBe(58)
+})
+
+test('without a window, the card of a file of code is its size and age, with none of its lines', cards, async ($, on) => {
   world(on)
   await startSession($)
   const ui = await reply($, 'Mira src/app.ts y el vídeo ' + VIDEO)
-  expect(await ui.find({ type: 'Code' })).toMatchObject({ props: { source: CODE.trimEnd(), path: SOURCE, startLine: 1 } })
+  expect(await ui.find({ type: 'Code' })).toBeUndefined()
   expect(await ui.find({ key: 'card:0:0' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /app\.ts · \d+ B · .* ago · click: show in folder/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: new RegExp(`^ ${CODE.length} B · \\d+ (s|min|h|d) ago $`) })).toBeDefined()
+})
+
+test('without a window, the card of a folder says so, and how long ago it changed', cards, async ($, on) => {
+  world(on)
+  await startSession($)
+  expect(await (await reply($, `Está en ${FOLDER}`)).find({ type: 'Text', text: /^ folder · \d+ (s|min|h|d) ago $/ })).toBeDefined()
 })
 
 test('on Linux a click asks the file manager to select the path, with no window', async ($, on) => {
