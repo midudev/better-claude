@@ -119,6 +119,7 @@ test('a path with a line names it; a file of code or text is known by its name, 
   expect(lineOf('src/app.ts:42:7.')).toBe(42)
   expect(lineOf('src/app.ts')).toBeUndefined()
   expect(['a.ts', 'b.tsx', 'c.html', 'd.css', 'e.json', 'f.md', 'Dockerfile', '.env.local', 'g.svg', 'h.mp4'].map(path => languageOf(path)?.name)).toEqual(['TypeScript', 'TypeScript JSX', 'HTML', 'CSS', 'JSON', 'Markdown', 'Dockerfile', 'Environment', undefined, undefined])
+  expect(['C:\\project\\Dockerfile', 'C:\\my.app\\.env.local', 'C:\\my.app\\Makefile', 'C:/project/a.ts'].map(path => languageOf(path)?.name)).toEqual(['Dockerfile', 'Environment', 'Makefile', 'TypeScript'])
   expect(tokenize('const a = "x" // y', languageOf('a.js')!.grammar)).toEqual([[['k', 'const'], ['', ' a = '], ['s', '"x"'], ['', ' '], ['c', '// y']]])
   expect(tokenize('<a href="/x">hi</a>', languageOf('a.html')!.grammar)[0]).toEqual([['', '<'], ['k', 'a'], ['', ' '], ['a', 'href'], ['', '='], ['s', '"/x"'], ['', '>hi</'], ['k', 'a'], ['', '>']])
   expect(tokenize('.card { color: #fff; }', languageOf('a.css')!.grammar)[0]).toEqual([['t', '.card'], ['', ' { '], ['a', 'color'], ['', ': '], ['n', '#fff'], ['', '; }']])
