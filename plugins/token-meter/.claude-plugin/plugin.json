@@ -1,6 +1,6 @@
 {
   "name": "token-meter",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Each turn's tokens and the session's running total, in color at the end of the hint line under the prompt.",
   "author": {
     "name": "Miguel Ángel Durán (midudev)",

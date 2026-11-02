@@ -33,7 +33,7 @@
       "name": "token-meter",
       "source": "./plugins/token-meter",
       "description": "Each turn's tokens and the session total, in color under the prompt.",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "category": "productivity"
     },
     {
