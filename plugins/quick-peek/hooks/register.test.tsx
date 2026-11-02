@@ -89,6 +89,8 @@ test('finds absolute, home, relative and bare paths, and cuts what a sentence ad
   expect(resolve('.\\src\\app.ts', 'C:\\project', 'C:\\Users\\ana')).toBe('C:/project/src/app.ts')
   expect(resolve('..\\lib\\x.ts', 'C:\\project\\app', 'C:\\Users\\ana')).toBe('C:/project/lib/x.ts')
   expect(resolve('src\\a.ts', '/project', '/Users/ana')).toBe('/project/src\\a.ts')
+  expect(found('mira .\\src\\app.ts y ..\\lib\\x.ts')).toEqual([['.\\src\\app.ts', '.\\src\\app.ts'], ['..\\lib\\x.ts', '..\\lib\\x.ts']])
+  expect(pathOfSpan('.\\My Videos\\a.mp4')).toBe('.\\My Videos\\a.mp4')
   // A home or working folder on a UNC share keeps its `//server/share` prefix.
   expect(resolve('~\\notas.md', 'C:\\project', '\\\\servidor\\usuarios\\ana')).toBe('//servidor/usuarios/ana/notas.md')
   expect(resolve('~/notas.md', 'C:\\project', '\\\\servidor\\usuarios\\ana')).toBe('//servidor/usuarios/ana/notas.md')

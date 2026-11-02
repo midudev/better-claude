@@ -14,7 +14,7 @@ const URL = /\b[a-z][a-z0-9+.-]*:\/\/[^\s<>()]+/gi
 // an extension. None starts inside a word, an address or another path.
 const CANDIDATE = new RegExp(
   [
-    String.raw`(?:~[\\/]|(?:~|\.{1,2})?\/)[^\s\`'"<>()[\]{}|*]+`,
+    String.raw`(?:~[\\/]|\.{1,2}[\\/]|(?:~|\.{1,2})?\/)[^\s\`'"<>()[\]{}|*]+`,
     String.raw`[A-Za-z]:[\\/][^\s\`'"<>()[\]{}|*]+`,
     String.raw`[\w@+-][\w@.+-]*(?:\/[\w@.+-]+)+\/?`,
     String.raw`[\w@+-][\w@.+-]*\.[A-Za-z][A-Za-z0-9]{0,9}`
@@ -22,7 +22,7 @@ const CANDIDATE = new RegExp(
   'g'
 )
 // A whole inline code span that is a path: it may hold spaces when it starts as a path does.
-const SPAN = /^(?:~\\|(?:~|\.{1,2})?\/|[A-Za-z]:[\\/])[^\n`]*[^\s`]$/
+const SPAN = /^(?:~\\|\.{1,2}\\|(?:~|\.{1,2})?\/|[A-Za-z]:[\\/])[^\n`]*[^\s`]$/
 
 /** The path `found` names, with what a sentence or a line number adds after it cut; none when nothing is left. */
 function clean (text: string) {
