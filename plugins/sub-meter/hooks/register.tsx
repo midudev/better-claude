@@ -113,6 +113,49 @@ async function syncFromStore ($: EngineInterface) {
   await update($, limits, () => saved as Limit[])
 }
 
+// From the options and session.start: how often the meter takes turns, whether it does, and whether
+// someone is at the session (a /clear keeps it; a mod loaded mid-session sees no session.start).
+let rotateMs = ROTATE_SECONDS * 1000
+let isRotating = true
+let isInteractive = true
+
+function stopTimers () {
+  tickTimer?.cancel()
+  tickTimer = undefined
+  rotateTimer?.cancel()
+  rotateTimer = undefined
+}
+
+/** Shows the stored reading, then the engine's own, and (with someone at the session) keeps the meter moving. */
+async function begin ($: EngineInterface) {
+  stopTimers()
+  const [saved, storedAt, usage] = await Promise.all([
+    $.store.get('limits'),
+    $.store.get('at'),
+    $.session.usage()
+  ])
+  if (Array.isArray(saved)) {
+    windowCount = saved.length
+    await update($, limits, () => saved as Limit[])
+  }
+  seenAt = Number(storedAt) || 0
+
+  await remember($, windowsOf(usage.rateLimits))
+
+  if (isInteractive) {
+    // Another session's reading shows up within TICK_MS of being stored.
+    tickTimer = $.clock.every(TICK_MS, () => {
+      void syncFromStore($).catch(() => {}) // a failed read keeps the reading on screen
+      if (windowCount > 0) void update($, tick, n => n + 1)
+    })
+    if (isRotating) {
+      rotateTimer = $.clock.every(rotateMs, () => {
+        if (windowCount >= 2) void update($, view, n => n + 1)
+      })
+    }
+  }
+}
+
 /** The windows to draw: all of them, the one the rotation is on, or the one chosen. With fewer than two readings, whatever there is. */
 function visible (all: Limit[], display: string, index: number): Limit[] {
   if (display === 'both' || all.length < 2) return all
@@ -128,8 +171,10 @@ export const register: Register = (on, options) => {
   const hideCycleHint = options.hideCycleHint !== false
   const hideInterruptHint = options.hideInterruptHint !== false
   const rotateSeconds = Number(options.rotateSeconds)
-  const rotateMs = (rotateSeconds > 0 ? rotateSeconds : ROTATE_SECONDS) * 1000
+  rotateMs = (rotateSeconds > 0 ? rotateSeconds : ROTATE_SECONDS) * 1000
   const display = DISPLAYS.includes(String(options.display)) ? String(options.display) : 'rotate'
+  isRotating = display === 'rotate'
+  isInteractive = true
   const hidden = [...(hideCycleHint ? [CYCLE_HINT] : []), ...(hideInterruptHint ? [INTERRUPT_HINT] : [])]
 
   /** The hint line without the parts hidden, and without the empty parts they leave. */
@@ -144,43 +189,22 @@ export const register: Register = (on, options) => {
   }
 
   on('session.start', async ($, e, next) => {
-    tickTimer?.cancel()
-    tickTimer = undefined
-    rotateTimer?.cancel()
-    rotateTimer = undefined
-    const [saved, storedAt, usage] = await Promise.all([
-      $.store.get('limits'),
-      $.store.get('at'),
-      $.session.usage()
-    ])
-    if (Array.isArray(saved)) {
-      windowCount = saved.length
-      await update($, limits, () => saved as Limit[])
-    }
-    seenAt = Number(storedAt) || 0
-
-    await remember($, windowsOf(usage.rateLimits))
-
-    if (e.isInteractive) {
-      // Another session's reading shows up within TICK_MS of being stored.
-      tickTimer = $.clock.every(TICK_MS, () => {
-        void syncFromStore($).catch(() => {}) // a failed read keeps the reading on screen
-        if (windowCount > 0) void update($, tick, n => n + 1)
-      })
-      if (display === 'rotate') {
-        rotateTimer = $.clock.every(rotateMs, () => {
-          if (windowCount >= 2) void update($, view, n => n + 1)
-        })
-      }
-    }
+    isInteractive = e.isInteractive
+    await begin($)
     return next(e)
   })
 
+  // A /clear ends the conversation, not the process: no session.start follows it, so the timers stay,
+  // and the next tick adopts the stored reading again in the new session.
   on('session.end', ($, e, next) => {
-    tickTimer?.cancel()
-    tickTimer = undefined
-    rotateTimer?.cancel()
-    rotateTimer = undefined
+    if (e.reason === 'clear') seenAt = 0
+    else stopTimers()
+    return next(e)
+  })
+
+  // The conversation a /clear starts holds none of the last one's values: the meter is drawn again at once.
+  on('classic.SessionStart', async ($, e, next) => {
+    if (e.source === 'clear') await begin($).catch(() => {})
     return next(e)
   })
 

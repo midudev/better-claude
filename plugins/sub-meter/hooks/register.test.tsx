@@ -21,6 +21,8 @@ function world (on: On, rateLimits: SessionRateLimit[] = LIMITS) {
     return { value: undefined }
   })
   on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+  on('classic.SessionStart', () => ({}))
   on('session.usage', () => ({ value: { startedAt: NOW, context: { window: 200_000 }, rateLimits } as never }))
   on('session.measure', ($, e) => ({ changed: e.changed }))
   // The engine's own node, as core answers it; with mode labels, a Box the tests find.
@@ -128,6 +130,40 @@ test('ignores a reading in the shared store that is older than its own', { optio
   w.store.at = NOW - 1000
   await w.clock.advance(8000)
   expect(await (await footer($)).find({ type: 'Text', text: ' 58%' })).toBeDefined()
+})
+
+const clear = async ($: Engine) => {
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
+  await $.classic.SessionStart({ source: 'clear' })
+}
+
+test('after a /clear the meter is drawn again and keeps taking turns', async ($, on) => {
+  const w = world(on)
+  await startSession($)
+  await clear($)
+  expect(await (await footer($)).find({ type: 'Text', text: '5h' })).toBeDefined()
+  await w.clock.advance(8000)
+  expect(await (await footer($)).find({ type: 'Text', text: 'week' })).toBeDefined()
+  await w.clock.advance(8000)
+  expect(await (await footer($)).find({ type: 'Text', text: '5h' })).toBeDefined()
+})
+
+test('after a /clear it still adopts the readings of other sessions', { options: { display: 'session' } }, async ($, on) => {
+  const w = world(on)
+  await startSession($)
+  await clear($)
+  w.store.limits = [{ ...LIMITS[0], percentUsed: 91 }, LIMITS[1]]
+  w.store.at = NOW + 1000
+  await w.clock.advance(8000)
+  expect(await (await footer($)).find({ type: 'Text', text: ' 91%' })).toBeDefined()
+})
+
+test('a session that really ends stops its timers', async ($, on) => {
+  const w = world(on)
+  await startSession($)
+  await $.session.end({ reason: 'prompt_input_exit', sessionId: 's1', resume: { id: 's1' } })
+  await w.clock.advance(8000)
+  expect(await (await footer($)).find({ type: 'Text', text: '5h' })).toBeDefined()
 })
 
 test('alone, with no mode labels, the meter ends the footer', async ($, on) => {
