@@ -150,11 +150,12 @@ $largest = if ($env:IMAGE_PREVIEW_SIZE) { [int]$env:IMAGE_PREVIEW_SIZE } else { 
 $life = if ($env:IMAGE_PREVIEW_LIFE) { [int]$env:IMAGE_PREVIEW_LIFE } else { 120 }
 # A form that shows without taking the focus, as a tool window, topmost, the pointer passing through.
 # Compiled once into the temp folder, then loaded from there: compiling takes a second.
-$assembly = Join-Path $env:TEMP 'image-preview-popup-1.dll'
+$assembly = Join-Path $env:TEMP 'image-preview-popup-2.dll'
 if (-not (Test-Path $assembly)) {
   try {
   Add-Type -OutputAssembly $assembly -OutputType Library -ReferencedAssemblies System.Windows.Forms, System.Drawing -TypeDefinition @'
 public class ImagePreviewPopup : System.Windows.Forms.Form {
+  public ImagePreviewPopup() { this.DoubleBuffered = true; }
   protected override bool ShowWithoutActivation { get { return true; } }
   protected override System.Windows.Forms.CreateParams CreateParams {
     get {
@@ -194,13 +195,14 @@ $form.StartPosition = 'Manual'
 $form.Bounds = New-Object System.Drawing.Rectangle($x, $y, $width, $height)
 $form.BackColor = [System.Drawing.Color]::FromArgb(32, 32, 32)
 $form.Padding = New-Object System.Windows.Forms.Padding($pad)
-$form.Opacity = 0.99
+# Starts invisible and is revealed once painted, so no unpainted (white) frame is ever shown.
+$form.Opacity = 0
 $box = New-Object System.Windows.Forms.PictureBox
 $box.Dock = 'Fill'
 $box.SizeMode = 'Zoom'
 $box.Image = $image
 $form.Controls.Add($box)
-$form.add_Shown({ [Console]::Out.WriteLine('shown'); [Console]::Out.Flush() })
+$form.add_Shown({ $form.Refresh(); $form.Opacity = 0.99; [Console]::Out.WriteLine('shown'); [Console]::Out.Flush() })
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = $life * 1000
 $timer.add_Tick({ $form.Close() })
