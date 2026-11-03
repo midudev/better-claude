@@ -182,7 +182,7 @@ test('the relative part follows the refresh interval', { options: { ...sameForAl
   await ui.unmount()
 })
 
-test('a session that ended stops refreshing', { options: { ...sameForAll('relative'), refreshSeconds: 15 } }, async ($, on) => {
+test('relative time keeps updating after /clear ends the session', { options: { ...sameForAll('relative'), refreshSeconds: 15 } }, async ($, on) => {
   const clock = engine(on)
   on('session.end', (_, e) => ({ sessionId: e.sessionId }))
 
@@ -192,7 +192,7 @@ test('a session that ended stops refreshing', { options: { ...sameForAll('relati
   await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } } as never)
 
   await clock.advance(2 * MINUTE_MS)
-  expect((await ui.find({ key: 'stamp' }))?.text).toBe('just now')
+  expect((await ui.find({ key: 'stamp' }))?.text).toBe('2m ago')
   await ui.unmount()
 })
 
