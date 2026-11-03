@@ -24,6 +24,7 @@ type Settings = {
 
 const plural = (n: number, unit: string) => `${n} ${unit}${n === 1 ? '' : 's'}`
 
+/** How long before `current` the message at `at` was sent: `just now`, `5m ago`, `3 hours`, as the settings ask. */
 function relative(at: number, current: number, settings: Settings): string {
   const elapsed = Math.max(0, current - at)
   if (elapsed < MINUTE) return 'just now'
@@ -38,6 +39,7 @@ function relative(at: number, current: number, settings: Settings): string {
   return settings.hasAgo ? `${amount} ago` : amount
 }
 
+/** The start of the local day `days` before the one holding `t`. */
 function daysBefore(t: number, days: number): number {
   const d = new Date(t)
   d.setDate(d.getDate() - days)
@@ -45,6 +47,7 @@ function daysBefore(t: number, days: number): number {
   return d.setHours(0, 0, 0, 0)
 }
 
+/** The pattern for a message's age: today, the 6 days before, earlier this year, or earlier years. */
 function formatFor(at: number, current: number, settings: Settings): string {
   const { formats } = settings
   if (at >= daysBefore(current, 0)) return formats.today
@@ -54,6 +57,7 @@ function formatFor(at: number, current: number, settings: Settings): string {
   return formats.older
 }
 
+/** The UTC offset of `d` as `±HH:mm`. */
 function offset(d: Date): string {
   const minutes = -d.getTimezoneOffset()
   const sign = minutes < 0 ? '-' : '+'
@@ -65,12 +69,14 @@ function offset(d: Date): string {
 // where it has none.
 const ZONE = new Intl.DateTimeFormat('en-US', { timeZoneName: 'short' })
 
+/** The short name of the zone `d` is in, such as `PST` or `GMT-7`. */
 function zoneName(d: Date): string {
   const parts = ZONE.formatToParts(d)
 
   return parts.find(part => part.type === 'timeZoneName')?.value ?? offset(d)
 }
 
+/** `format` with each token replaced by its part of `at`, and `relative` by the time since then. */
 function formatTime(at: number, current: number, format: string, settings: Settings): string {
   const d = new Date(at)
   const hour12 = d.getHours() % 12 || 12
