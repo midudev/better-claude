@@ -182,6 +182,20 @@ test('the relative part follows the refresh interval', { options: { ...sameForAl
   await ui.unmount()
 })
 
+test('a session that ended stops refreshing', { options: { ...sameForAll('relative'), refreshSeconds: 15 } }, async ($, on) => {
+  const clock = engine(on)
+  on('session.end', (_, e) => ({ sessionId: e.sessionId }))
+
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.session.append(prompt('end1'))
+  const ui = await $.ui.mount(USER_ROW('terminal', 'end1'))
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } } as never)
+
+  await clock.advance(2 * MINUTE_MS)
+  expect((await ui.find({ key: 'stamp' }))?.text).toBe('just now')
+  await ui.unmount()
+})
+
 // An hourly refresh keeps the clock's timer waits under the test kit's limit across 410 days.
 test('each age range uses its own pattern', { options: { refreshSeconds: 3600, formatHover: '' } }, async ($, on) => {
   const clock = engine(on)

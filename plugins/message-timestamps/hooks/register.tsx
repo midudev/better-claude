@@ -1,5 +1,5 @@
 import { atom, memberOf, read, update } from 'claude-code'
-import type { Register } from 'claude-code'
+import type { Register, Timer } from 'claude-code'
 
 const sentAt = atom({ plugin: 'message-timestamps', key: 'sentAt' } as const, null)
 const now = atom({ plugin: 'message-timestamps', key: 'now' } as const, 0)
@@ -127,16 +127,29 @@ export const register: Register = (on, options) => {
     patterns.some(pattern => pattern.replace(/\[[^\]]*\]/g, '').includes('relative'))
   const refreshMs = Math.max(1, Number(options.refreshSeconds)) * 1000
   const withIcon = (icon: unknown, shown: string) => (icon ? `${String(icon)} ${shown}` : shown)
+  // A /clear or a resume ends the session and starts another in the same process.
+  let refresh: Timer | undefined
+  const stopRefresh = () => {
+    refresh?.cancel()
+    refresh = undefined
+  }
 
   on('session.start', async ($, e, next) => {
+    stopRefresh()
     if (isLive) {
       const tick = async () => {
         const at = await $.clock.now()
         await update($, now, () => at)
       }
       await tick()
-      $.clock.every(refreshMs, () => void tick())
+      refresh = $.clock.every(refreshMs, () => void tick())
     }
+
+    return next(e)
+  })
+
+  on('session.end', ($, e, next) => {
+    stopRefresh()
 
     return next(e)
   })
