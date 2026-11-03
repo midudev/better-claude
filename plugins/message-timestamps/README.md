@@ -93,6 +93,7 @@ While the pointer is on a timestamp, `formatHover` is shown in its place. It tak
 
 - Timestamps start when the mod loads: the messages before it, and the history of a resumed session, have none.
 - The prompt Claude Code pins to the top of the screen while you scroll shows no timestamp: a mod cannot draw there.
+- Slash commands that run without Claude, such as `/model` or `/rename`, show no timestamp: Claude Code draws their row without the id of the message it stores, so there is no time to look up.
 - The hover works in the terminal and the desktop app, not in VS Code. The terminal reports the pointer only in fullscreen mode (`"tui": "fullscreen"`).
 
 ## How it works
