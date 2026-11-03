@@ -76,6 +76,31 @@ test('finds absolute, home, relative and bare paths, and cuts what a sentence ad
   expect(pathOfSpan('npm run build')).toBeUndefined()
   expect(resolve('../b/./c.txt', '/project/app', '/Users/ana')).toBe('/project/b/c.txt')
   expect(resolve('~/x', '/project/app', '/Users/ana')).toBe('/Users/ana/x')
+  // Windows: a drive path keeps its drive, whether it comes from the text, home or the working folder.
+  expect(resolve('C:\\Users\\ana\\x.txt', 'C:\\project', 'C:\\Users\\ana')).toBe('C:/Users/ana/x.txt')
+  expect(resolve('C:/Users/ana/a/../x.txt', 'C:\\project', 'C:\\Users\\ana')).toBe('C:/Users/ana/x.txt')
+  expect(resolve('~/notas.md', 'C:\\project', 'C:\\Users\\ana')).toBe('C:/Users/ana/notas.md')
+  expect(resolve('src/app.ts', 'C:\\project', 'C:\\Users\\ana')).toBe('C:/project/src/app.ts')
+  expect(found('en C:/Users/ana/x.txt y C:\\Users\\ana\\y.txt')).toEqual([['C:/Users/ana/x.txt', 'C:/Users/ana/x.txt'], ['C:\\Users\\ana\\y.txt', 'C:\\Users\\ana\\y.txt']])
+  expect(pathOfSpan('C:/My Videos/a b.mp4')).toBe('C:/My Videos/a b.mp4')
+  expect(resolve('~\\notas.md', 'C:\\project', 'C:\\Users\\ana')).toBe('C:/Users/ana/notas.md')
+  expect(found('abre ~\\notas.md ya')).toEqual([['~\\notas.md', '~\\notas.md']])
+  expect(pathOfSpan('~\\My Videos\\a.mp4')).toBe('~\\My Videos\\a.mp4')
+  expect(resolve('.\\src\\app.ts', 'C:\\project', 'C:\\Users\\ana')).toBe('C:/project/src/app.ts')
+  expect(resolve('..\\lib\\x.ts', 'C:\\project\\app', 'C:\\Users\\ana')).toBe('C:/project/lib/x.ts')
+  expect(resolve('src\\a.ts', '/project', '/Users/ana')).toBe('/project/src\\a.ts')
+  expect(found('mira .\\src\\app.ts y ..\\lib\\x.ts')).toEqual([['.\\src\\app.ts', '.\\src\\app.ts'], ['..\\lib\\x.ts', '..\\lib\\x.ts']])
+  expect(pathOfSpan('.\\My Videos\\a.mp4')).toBe('.\\My Videos\\a.mp4')
+  // A home or working folder on a UNC share keeps its `//server/share` prefix.
+  expect(resolve('~\\notas.md', 'C:\\project', '\\\\servidor\\usuarios\\ana')).toBe('//servidor/usuarios/ana/notas.md')
+  expect(resolve('~/notas.md', 'C:\\project', '\\\\servidor\\usuarios\\ana')).toBe('//servidor/usuarios/ana/notas.md')
+  expect(resolve('src/app.ts', '\\\\servidor\\proyectos\\app', 'C:\\Users\\ana')).toBe('//servidor/proyectos/app/src/app.ts')
+  // An absolute UNC target keeps its share when the working folder is a Windows path.
+  expect(resolve('//servidor/proyectos/x.ts', 'C:\\project', 'C:\\Users\\ana')).toBe('//servidor/proyectos/x.ts')
+  expect(resolve('\\\\servidor\\proyectos\\..\\x.ts', 'C:\\project', undefined)).toBe('//servidor/proyectos/x.ts')
+  // On POSIX a backslash belongs to the name, and a leading `//` is not a share.
+  expect(resolve('//usr/bin/x', '/project', '/Users/ana')).toBe('/usr/bin/x')
+  expect(resolve('~/foo\\bar.txt', '/project', '/Users/ana')).toBe('/Users/ana/foo\\bar.txt')
 })
 
 test('a path with a line names it; a file of code or text is known by its name, and its lines are tokens', () => {

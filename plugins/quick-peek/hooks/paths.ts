@@ -14,15 +14,15 @@ const URL = /\b[a-z][a-z0-9+.-]*:\/\/[^\s<>()]+/gi
 // an extension. None starts inside a word, an address or another path.
 const CANDIDATE = new RegExp(
   [
-    String.raw`(?:~|\.{1,2})?\/[^\s\`'"<>()[\]{}|*]+`,
-    String.raw`[A-Za-z]:\\[^\s\`'"<>()[\]{}|*]+`,
+    String.raw`(?:~[\\/]|\.{1,2}[\\/]|(?:~|\.{1,2})?\/)[^\s\`'"<>()[\]{}|*]+`,
+    String.raw`[A-Za-z]:[\\/][^\s\`'"<>()[\]{}|*]+`,
     String.raw`[\w@+-][\w@.+-]*(?:\/[\w@.+-]+)+\/?`,
     String.raw`[\w@+-][\w@.+-]*\.[A-Za-z][A-Za-z0-9]{0,9}`
   ].map(source => `(?<![\\w/.~:\\\\@-])(?:${source})(?::\\d+(?::\\d+)?)?`).join('|'),
   'g'
 )
 // A whole inline code span that is a path: it may hold spaces when it starts as a path does.
-const SPAN = /^(?:(?:~|\.{1,2})?\/|[A-Za-z]:\\)[^\n`]*[^\s`]$/
+const SPAN = /^(?:~\\|\.{1,2}\\|(?:~|\.{1,2})?\/|[A-Za-z]:[\\/])[^\n`]*[^\s`]$/
 
 /** The path `found` names, with what a sentence or a line number adds after it cut; none when nothing is left. */
 function clean (text: string) {
@@ -62,22 +62,39 @@ export function pathOfSpan (code: string): string | undefined {
 
 /**
  * Where `target` lands: home for `~`, the working folder for a relative path; `.` and `..`
- * folded, no trailing `/`. A Windows path stays as written.
+ * folded, no trailing `/`. A Windows path keeps its drive letter and is joined with `/`.
  */
 export function resolve (target: string, cwd: string, home: string | undefined) {
-  if (/^[A-Za-z]:\\/.test(target)) return target
-  let path = target
-  if (path === '~' || path.startsWith('~/')) {
+  // On Windows a path keeps its root, a drive (`C:`) or a UNC share (`//server/share`), and the rest
+  // is joined with `/`, which the file APIs and the Explorer calls accept. A target names a drive;
+  // home and the working folder may also be on a UNC share.
+  const DRIVE = /^[A-Za-z]:(?=[\\/])/
+  const ROOT = /^(?:[A-Za-z]:|[\\/]{2}[^\\/]+[\\/][^\\/]+)(?=[\\/]|$)/
+  const slashedBase = (p: string) => (ROOT.test(p) ? p.replaceAll('\\', '/') : p)
+  const rootOf = (p: string) => ROOT.exec(p)?.[0].replaceAll('\\', '/') ?? ''
+  // A UNC target keeps its share only where the working folder or home is a Windows path.
+  const windowsContext = ROOT.test(cwd) || (home !== undefined && ROOT.test(home))
+  const isUnc = windowsContext && !DRIVE.test(target) && ROOT.test(target)
+  let path = DRIVE.test(target) || isUnc ? target.replaceAll('\\', '/') : target
+  let root = DRIVE.test(target) ? target.slice(0, 2) : isUnc ? rootOf(target) : ''
+  // A backslash is a separator only where home is a Windows path: on POSIX it is part of a name.
+  const isWindowsHome = home !== undefined && ROOT.test(home)
+  if (path === '~' || path.startsWith('~/') || (isWindowsHome && path.startsWith('~\\'))) {
     if (!home) return undefined
-    path = home + path.slice(1)
-  } else if (!path.startsWith('/')) {
-    path = `${cwd}/${path}`
+    const rest = path.slice(1)
+    root = isWindowsHome ? rootOf(home) : ''
+    path = slashedBase(home) + (isWindowsHome ? rest.replaceAll('\\', '/') : rest)
+  } else if (!path.startsWith('/') && !DRIVE.test(path)) {
+    root = rootOf(cwd)
+    // Under a Windows working folder a relative target may use backslashes too.
+    path = `${slashedBase(cwd)}/${root ? path.replaceAll('\\', '/') : path}`
   }
+  if (root) path = path.slice(root.length)
   const parts: string[] = []
   for (const part of path.split('/')) {
     if (part === '' || part === '.') continue
     if (part === '..') parts.pop()
     else parts.push(part)
   }
-  return `/${parts.join('/')}`
+  return `${root}/${parts.join('/')}`
 }
