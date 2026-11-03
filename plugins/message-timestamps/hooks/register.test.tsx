@@ -187,9 +187,9 @@ test('relative time keeps updating after /clear ends the session', { options: { 
   on('session.end', (_, e) => ({ sessionId: e.sessionId }))
 
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } } as never)
   await $.session.append(prompt('end1'))
   const ui = await $.ui.mount(USER_ROW('terminal', 'end1'))
-  await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } } as never)
 
   await clock.advance(2 * MINUTE_MS)
   expect((await ui.find({ key: 'stamp' }))?.text).toBe('2m ago')
