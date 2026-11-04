@@ -14,6 +14,8 @@ const TICK_MS = 8000
 const DISPLAYS = ['rotate', 'both', 'session', 'week']
 const WINDOW_OF: Record<string, string> = { session: 'five_hour', week: 'seven_day' }
 const CELLS = 10
+const HOUR_MS = 3_600_000
+const WINDOW_MS: Record<string, number> = { five_hour: 5 * HOUR_MS, seven_day: 7 * 24 * HOUR_MS }
 const CYCLE_HINT = /\s*\([^()]+ to cycle\)/
 const INTERRUPT_HINT = /\s*esc to interrupt/
 // The terminal footer's row: two columns of padding at each end, the mode label at the left
@@ -79,6 +81,32 @@ function roomOf (e: { surface: string; viewport?: RenderViewport }) {
 }
 
 const colorFor = (percent: number) => (percent >= 90 ? 'error' : percent >= 75 ? 'warning' : 'claude')
+
+/**
+ * The cell that marks how much of the window has gone by: the last one a bar used at that same pace
+ * would fill, so the bar ends on the mark when usage keeps up with the time. None without a running window.
+ */
+function markOf (kind: string, resetsIn: number | undefined) {
+  const length = WINDOW_MS[kind]
+  if (length === undefined || resetsIn === undefined || !(resetsIn > 0)) return undefined
+  const elapsed = Math.max(0, 1 - resetsIn / length)
+  return Math.max(0, Math.round(elapsed * CELLS) - 1)
+}
+
+/** The bar's cells as runs of one look (used, free, the mark over either), after the space that parts it from the label. */
+function barOf (filled: number, mark: number | undefined) {
+  const runs: { part: 'used' | 'free' | 'mark'; text: string }[] = []
+  for (let cell = 0; cell < CELLS; cell++) {
+    const isUsed = cell < filled
+    const part = cell === mark ? 'mark' : isUsed ? 'used' : 'free'
+    const glyph = cell === mark ? '┃' : isUsed ? '━' : '─'
+    const last = runs.at(-1)
+    if (last?.part === part) last.text += glyph
+    else runs.push({ part, text: glyph })
+  }
+  runs[0].text = ' ' + runs[0].text
+  return runs
+}
 
 /** "42m", "3h 5m", "2d 4h": how long until the window resets. */
 function until (ms: number) {
@@ -170,6 +198,7 @@ export const register: Register = (on, options) => {
   lastTidied = ''
   const hideCycleHint = options.hideCycleHint !== false
   const hideInterruptHint = options.hideInterruptHint !== false
+  const showTimeMark = options.showTimeMark === true
   const rotateSeconds = Number(options.rotateSeconds)
   rotateMs = (rotateSeconds > 0 ? rotateSeconds : ROTATE_SECONDS) * 1000
   const display = DISPLAYS.includes(String(options.display)) ? String(options.display) : 'rotate'
@@ -234,7 +263,8 @@ export const register: Register = (on, options) => {
       const label = LABELS[limit.kind] ?? limit.kind
       const used = ` ${Math.round(percent)}%`
       const reset = resetsIn !== undefined && !hasReset ? ` ↻ ${until(resetsIn)}` : ''
-      return { kind: limit.kind, label, percent, filled, used, reset, short: widthOf(label + used) }
+      const bar = barOf(filled, showTimeMark ? markOf(limit.kind, resetsIn) : undefined)
+      return { kind: limit.kind, label, percent, bar, used, reset, short: widthOf(label + used) }
     })
     const below = widthOfNode(beneath, e.props.modes)
     const hasPlugin = holdsPlugin(beneath)
@@ -258,8 +288,15 @@ export const register: Register = (on, options) => {
           <Box flexDirection="row" key={w.kind}>
             {i > 0 ? <Text dimColor>{BETWEEN}</Text> : null}
             <Text dimColor>{w.label}</Text>
-            {fit.hasBar ? <Text color={colorFor(w.percent)}>{' ' + '━'.repeat(w.filled)}</Text> : null}
-            {fit.hasBar ? <Text dimColor>{'─'.repeat(CELLS - w.filled)}</Text> : null}
+            {fit.hasBar
+              ? w.bar.map((run, at) =>
+                  run.part === 'used'
+                    ? <Text color={colorFor(w.percent)} key={at}>{run.text}</Text>
+                    : run.part === 'free'
+                      ? <Text dimColor key={at}>{run.text}</Text>
+                      : <Text bold key={at}>{run.text}</Text>
+                )
+              : null}
             <Text>{w.used}</Text>
             {fit.hasReset && w.reset ? <Text dimColor>{w.reset}</Text> : null}
           </Box>

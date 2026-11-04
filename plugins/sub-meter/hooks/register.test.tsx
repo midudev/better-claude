@@ -314,3 +314,67 @@ test('off the terminal the meter is drawn whole', async ($, on) => {
   const ui = await $.ui.mount({ plugin: 'sub-meter', surface: 'desktop', component: 'SessionMode', props: { modes: [] }, viewport: { columns: 30, rows: 30 } })
   expect(await ui.find({ type: 'Text', text: ' ━━━━━━' })).toBeDefined()
 })
+
+const bar = async ($: Engine) => (await texts(await footer($))).slice(1, -2).join('')
+
+test('by default there is no time mark', { options: { display: 'session' } }, async ($, on) => {
+  world(on, [{ kind: 'five_hour', percentUsed: 58, resetsAt: at(HOUR) }])
+  await startSession($)
+  expect(await bar($)).toBe(' ━━━━━━────')
+  expect(await (await footer($)).find({ type: 'Text', text: '┃' })).toBeUndefined()
+})
+
+test('showTimeMark draws a vertical mark over the bar at how much of the window has gone by', { options: { display: 'session', showTimeMark: true } }, async ($, on) => {
+  world(on, [{ kind: 'five_hour', percentUsed: 58, resetsAt: at(HOUR) }])
+  await startSession($)
+  expect(await bar($)).toBe(' ━━━━━━─┃──')
+  const mark = await (await footer($)).find({ type: 'Text', text: '┃' })
+  expect(mark?.props.bold).toBe(true)
+})
+
+test('the mark is drawn over the used cells when usage runs ahead of the time, and the bar stays in its color', { options: { display: 'session', showTimeMark: true } }, async ($, on) => {
+  world(on, [{ kind: 'five_hour', percentUsed: 80, resetsAt: at(4 * HOUR) }])
+  await startSession($)
+  expect(await bar($)).toBe(' ━┃━━━━━━──')
+  const ui = await footer($)
+  expect((await ui.find({ type: 'Text', text: ' ━' }))?.props.color).toBe('warning')
+  expect((await ui.find({ type: 'Text', text: '━━━━━━' }))?.props.color).toBe('warning')
+})
+
+test('the weekly mark measures seven days', { options: { display: 'week', showTimeMark: true } }, async ($, on) => {
+  world(on, [{ kind: 'seven_day', percentUsed: 20, resetsAt: at(84 * HOUR) }])
+  await startSession($)
+  expect(await bar($)).toBe(' ━━──┃─────')
+})
+
+test('the mark moves as time goes by', { options: { display: 'session', showTimeMark: true } }, async ($, on) => {
+  const w = world(on, [{ kind: 'five_hour', percentUsed: 0, resetsAt: at(4 * HOUR) }])
+  await startSession($)
+  expect(await bar($)).toBe(' ─┃────────')
+  await w.clock.set(NOW + 3 * HOUR)
+  expect(await bar($)).toBe(' ───────┃──')
+})
+
+test('the mark stays within the bar at both ends of the window', { options: { display: 'session', showTimeMark: true } }, async ($, on) => {
+  const w = world(on, [{ kind: 'five_hour', percentUsed: 0, resetsAt: at(5 * HOUR) }])
+  await startSession($)
+  expect(await bar($)).toBe(' ┃─────────')
+  await w.clock.set(NOW + 5 * HOUR - 60_000)
+  expect(await bar($)).toBe(' ─────────┃')
+})
+
+test('without a reset time, or past it, there is no mark', { options: { display: 'session', showTimeMark: true } }, async ($, on) => {
+  const w = world(on, [{ kind: 'five_hour', percentUsed: 58, resetsAt: at(HOUR) }])
+  await startSession($)
+  await w.clock.set(NOW + 2 * HOUR)
+  expect(await texts(await footer($))).toEqual(['5h', ' ──────────', ' 0%'])
+  await $.session.measure({ context: { window: 200_000 }, rateLimits: [{ kind: 'five_hour', percentUsed: 58 }], changed: ['rateLimits'] } as never)
+  expect(await texts(await footer($))).toEqual(['5h', ' ━━━━━━', '────', ' 58%'])
+})
+
+test('the mark keeps the bar its width: the meter gives it up where it did without', { options: { showTimeMark: true } }, async ($, on) => {
+  world(on)
+  await startSession($)
+  expect(await texts(await footer($, [], 56))).toEqual(['5h', ' ━━━━━', '┃', '────', ' 58%', ' ↻ 2h 10m'])
+  expect(await texts(await footer($, [], 55))).toEqual(['5h', ' 58%', ' ↻ 2h 10m'])
+})

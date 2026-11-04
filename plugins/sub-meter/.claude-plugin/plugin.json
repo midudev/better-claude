@@ -1,6 +1,6 @@
 {
   "name": "sub-meter",
-  "version": "0.4.3",
+  "version": "0.5.0",
   "description": "Your subscription usage at the bottom right of Claude Code: the 5-hour and weekly windows, taking turns, side by side or fixed on one of them.",
   "author": {
     "name": "Miguel Ángel Durán (midudev)",
@@ -25,6 +25,12 @@
       "description": "How long the meter shows each window (5-hour, weekly) before it switches to the other. Only used when display is rotate.",
       "default": 8,
       "min": 1
+    },
+    "showTimeMark": {
+      "type": "boolean",
+      "title": "Show the time mark",
+      "description": "Draw a vertical mark over the bar at how much of the window has gone by, to compare your usage with the time.",
+      "default": false
     },
     "hideCycleHint": {
       "type": "boolean",
