@@ -45,7 +45,8 @@ test('shows the 5-hour window first, as a bar with the time until it resets', as
   await startSession($)
   const ui = await footer($)
   expect(await ui.find({ type: 'Text', text: '5h' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: ' ━━━━━━' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' ━━━━━' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '┃' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: '────' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: ' 58%' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: ' ↻ 2h 10m' })).toBeDefined()
@@ -179,7 +180,7 @@ test("keeps the engine's mode labels after the meter", async ($, on) => {
   const ui = await footer($, ['focus'])
   const row = await ui.drawn()
   expect(row.children?.at(-1)).toMatchObject({ props: { key: 'engine' } })
-  expect((await ui.findAll({ type: 'Text' })).map(text => text.text)).toEqual(['5h', ' ━━━━━━', '────', ' 58%', ' ↻ 2h 10m', ' · '])
+  expect((await ui.findAll({ type: 'Text' })).map(text => text.text)).toEqual(['5h', ' ━━━━━', '┃', '────', ' 58%', ' ↻ 2h 10m', ' · '])
 })
 
 test("keeps another plugin's drawing there after the meter, so it stays last", async ($, on) => {
@@ -207,8 +208,9 @@ test('a new measurement shows at once and is kept for the next session', async (
   await startSession($)
   await $.session.measure({ context: { window: 200_000 }, rateLimits: [{ ...LIMITS[0], percentUsed: 91 }], changed: ['rateLimits'] } as never)
   const ui = await footer($)
-  const used = await ui.find({ type: 'Text', text: ' ━━━━━━━━━' })
+  const used = await ui.find({ type: 'Text', text: ' ━━━━━' })
   expect(used?.props.color).toBe('error')
+  expect((await ui.find({ type: 'Text', text: '━━━' }))?.props.color).toBe('error')
   expect(w.store.limits).toEqual([{ ...LIMITS[0], percentUsed: 91 }])
 })
 
@@ -258,7 +260,7 @@ const texts = async (ui: { findAll: (query: { type: 'Text' }) => Promise<{ text?
 test('where the row is short the meter gives up its bar, then the reset time, then itself', async ($, on) => {
   world(on)
   await startSession($)
-  expect(await texts(await footer($, [], 56))).toEqual(['5h', ' ━━━━━━', '────', ' 58%', ' ↻ 2h 10m'])
+  expect(await texts(await footer($, [], 56))).toEqual(['5h', ' ━━━━━', '┃', '────', ' 58%', ' ↻ 2h 10m'])
   expect(await texts(await footer($, [], 55))).toEqual(['5h', ' 58%', ' ↻ 2h 10m'])
   expect(await texts(await footer($, [], 44))).toEqual(['5h', ' 58%'])
   const none = await footer($, [], 35)
@@ -269,7 +271,7 @@ test('the hint beside the mode label takes its room from the meter', async ($, o
   world(on)
   await startSession($)
   await hint($, '? for shortcuts')
-  expect(await texts(await footer($, [], 72))).toEqual(['5h', ' ━━━━━━', '────', ' 58%', ' ↻ 2h 10m'])
+  expect(await texts(await footer($, [], 72))).toEqual(['5h', ' ━━━━━', '┃', '────', ' 58%', ' ↻ 2h 10m'])
   expect(await texts(await footer($, [], 71))).toEqual(['5h', ' 58%', ' ↻ 2h 10m'])
 })
 
@@ -285,7 +287,7 @@ test("another plugin's switch beneath keeps its room: the meter shrinks first", 
 }] }, async ($, on) => {
   world(on)
   await startSession($)
-  expect(await texts(await footer($, [], 68))).toEqual(['5h', ' ━━━━━━', '────', ' 58%', ' ↻ 2h 10m', ' · ', '⏵ narrator on'])
+  expect(await texts(await footer($, [], 68))).toEqual(['5h', ' ━━━━━', '┃', '────', ' 58%', ' ↻ 2h 10m', ' · ', '⏵ narrator on'])
   expect(await texts(await footer($, [], 67))).toEqual(['5h', ' 58%', ' ↻ 2h 10m', ' · ', '⏵ narrator on'])
   expect(await texts(await footer($, [], 47))).toEqual(['⏵ narrator on'])
 })
@@ -312,5 +314,55 @@ test('off the terminal the meter is drawn whole', async ($, on) => {
   world(on)
   await startSession($)
   const ui = await $.ui.mount({ plugin: 'sub-meter', surface: 'desktop', component: 'SessionMode', props: { modes: [] }, viewport: { columns: 30, rows: 30 } })
-  expect(await ui.find({ type: 'Text', text: ' ━━━━━━' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' ━━━━━' })).toBeDefined()
+})
+
+const bar = async ($: Engine) => (await texts(await footer($))).slice(1, -2).join('')
+
+test('a vertical mark over the bar shows how much of the window has gone by', { options: { display: 'session' } }, async ($, on) => {
+  world(on, [{ kind: 'five_hour', percentUsed: 58, resetsAt: at(HOUR) }])
+  await startSession($)
+  expect(await bar($)).toBe(' ━━━━━━─┃──')
+  const mark = await (await footer($)).find({ type: 'Text', text: '┃' })
+  expect(mark?.props.bold).toBe(true)
+})
+
+test('the mark is drawn over the used cells when usage runs ahead of the time, and the bar stays in its color', { options: { display: 'session' } }, async ($, on) => {
+  world(on, [{ kind: 'five_hour', percentUsed: 80, resetsAt: at(4 * HOUR) }])
+  await startSession($)
+  expect(await bar($)).toBe(' ━┃━━━━━━──')
+  const ui = await footer($)
+  expect((await ui.find({ type: 'Text', text: ' ━' }))?.props.color).toBe('warning')
+  expect((await ui.find({ type: 'Text', text: '━━━━━━' }))?.props.color).toBe('warning')
+})
+
+test('the weekly mark measures seven days', { options: { display: 'week' } }, async ($, on) => {
+  world(on, [{ kind: 'seven_day', percentUsed: 20, resetsAt: at(84 * HOUR) }])
+  await startSession($)
+  expect(await bar($)).toBe(' ━━──┃─────')
+})
+
+test('the mark moves as time goes by', { options: { display: 'session' } }, async ($, on) => {
+  const w = world(on, [{ kind: 'five_hour', percentUsed: 0, resetsAt: at(4 * HOUR) }])
+  await startSession($)
+  expect(await bar($)).toBe(' ─┃────────')
+  await w.clock.set(NOW + 3 * HOUR)
+  expect(await bar($)).toBe(' ───────┃──')
+})
+
+test('the mark stays within the bar at both ends of the window', { options: { display: 'session' } }, async ($, on) => {
+  const w = world(on, [{ kind: 'five_hour', percentUsed: 0, resetsAt: at(5 * HOUR) }])
+  await startSession($)
+  expect(await bar($)).toBe(' ┃─────────')
+  await w.clock.set(NOW + 5 * HOUR - 60_000)
+  expect(await bar($)).toBe(' ─────────┃')
+})
+
+test('without a reset time, or past it, there is no mark', { options: { display: 'session' } }, async ($, on) => {
+  const w = world(on, [{ kind: 'five_hour', percentUsed: 58, resetsAt: at(HOUR) }])
+  await startSession($)
+  await w.clock.set(NOW + 2 * HOUR)
+  expect(await texts(await footer($))).toEqual(['5h', ' ──────────', ' 0%'])
+  await $.session.measure({ context: { window: 200_000 }, rateLimits: [{ kind: 'five_hour', percentUsed: 58 }], changed: ['rateLimits'] } as never)
+  expect(await texts(await footer($))).toEqual(['5h', ' ━━━━━━', '────', ' 58%'])
 })
