@@ -60,7 +60,7 @@ A new prompt cuts the narration short. It stays on in your next sessions until y
    curl -L https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-fr_FR-siwis-medium-int8.tar.bz2 | tar xj
    ```
 
-   A Matcha model also takes its vocoder in its folder: a Vocos `.onnx` from the [vocoder models](https://github.com/k2-fsa/sherpa-onnx/releases/tag/vocoder-models).
+   A Matcha model also takes its vocoder in its folder: a Vocos or HiFi-GAN `.onnx` from the [vocoder models](https://github.com/k2-fsa/sherpa-onnx/releases/tag/vocoder-models).
 3. Set the Speak command to `onnx-say` and its folders, one per language and one with no language for the others:
 
    ```text

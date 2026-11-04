@@ -5,7 +5,7 @@
 The folder holds one model as sherpa-onnx ships it: the .onnx file, tokens.txt and, as the model
 needs them, espeak-ng-data/, voices.bin, lexicons, dict/ and rule .fst files. The model's family
 (VITS, Kokoro, Kitten, Matcha) is read from the .onnx file's metadata, so a folder of any name
-works. A Matcha model takes its vocoder (a Vocos .onnx) from the same folder. A file named for a
+works. A Matcha model takes its vocoder (a Vocos or HiFi-GAN .onnx) from the same folder. A file named for a
 language (lexicon-us-en.txt, number-zh.fst) is only used for that language.
 """
 import argparse
@@ -14,6 +14,9 @@ import sys
 from pathlib import Path
 
 import sherpa_onnx
+
+# The vocoders' model types sherpa-onnx takes for a Matcha model (vocoder.cc).
+VOCODERS = ("vocos", "matcha-tts vocos", "hifigan")
 
 
 def varint(data, at):
@@ -78,7 +81,7 @@ def config(folder, lang):
     for path in folder.glob("*.onnx"):
         found = metadata(path)
         models.setdefault(found.get("model_type", ""), path)
-        if found.get("model_type") != "vocos":
+        if found.get("model_type") not in VOCODERS:
             voice = voice or found.get("voice", "")
     region = voice.lower().split("-", 1)[1] if voice.lower().startswith(f"{lang}-") else ""
     tokens = str(folder / "tokens.txt")
@@ -100,9 +103,9 @@ def config(folder, lang):
         model.kitten = sherpa_onnx.OfflineTtsKittenModelConfig(
             model=str(models["kitten-tts"]), voices=voices, tokens=tokens, data_dir=data_dir)
     elif "matcha-tts" in models:
-        vocoder = models.get("vocos")
+        vocoder = next((models[kind] for kind in VOCODERS if kind in models), None)
         if vocoder is None:
-            sys.exit(f"speak.py: the Matcha model in {folder} needs its vocoder (a Vocos .onnx) beside it")
+            sys.exit(f"speak.py: the Matcha model in {folder} needs its vocoder (a Vocos or HiFi-GAN .onnx) beside it")
         model.matcha = sherpa_onnx.OfflineTtsMatchaModelConfig(
             acoustic_model=str(models["matcha-tts"]), vocoder=str(vocoder), tokens=tokens,
             lexicon=lexicon, data_dir=data_dir, dict_dir=dict_dir)
