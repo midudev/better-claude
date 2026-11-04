@@ -516,6 +516,19 @@ test('where the terminal cannot draw the picture, the card opens in a window of 
   expect(w.windows[0]!.isEnded).toBe(true)
 })
 
+test('inside Herdr, which says it is Ghostty but refuses file pictures, the card opens in a window', async ($, on) => {
+  const w = world(on, { draft: '[Image #1]', env: { TERM_PROGRAM: 'ghostty', HC_TERMINAL_ID: 't1' } })
+  await startSession($)
+  await w.clock.settle()
+  const ui = await band($)
+  await point(ui, 'chip:1')
+  await w.clock.advance(100)
+
+  expect(w.windows).toHaveLength(1)
+  expect(w.windows[0]!.argv.slice(0, 4)).toEqual(['osascript', '-l', 'JavaScript', '-e'])
+  expect(await ui.find({ key: 'image-1' })).toBeUndefined()
+})
+
 test('moving from one image to the next ends the first window and opens the next', async ($, on) => {
   const w = world(on, { draft: '[Image #1] [Image #2]', files: { '1.png': 2048, '2.png': 2048 } })
   await startSession($)
