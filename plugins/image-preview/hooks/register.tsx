@@ -602,15 +602,18 @@ export const register: Register = (on, options) => {
     poll?.cancel()
     poll = undefined
     const result = await next(e)
-    const [program, term, kittyWindow, forceImages, sshConnection, sshTty] = await Promise.all([
+    const [program, term, kittyWindow, forceImages, sshConnection, sshTty, herdrTerminal] = await Promise.all([
       $.env.get('TERM_PROGRAM'),
       $.env.get('TERM'),
       $.env.get('KITTY_WINDOW_ID'),
       $.env.get('CLAUDE_CODE_FORCE_TERMINAL_IMAGES'),
       $.env.get('SSH_CONNECTION'),
-      $.env.get('SSH_TTY')
+      $.env.get('SSH_TTY'),
+      $.env.get('HC_TERMINAL_ID')
     ])
-    const isNative = program === 'ghostty' || term === 'xterm-ghostty' || term === 'xterm-kitty' || kittyWindow !== undefined
+    // Herdr says it is Ghostty (TERM_PROGRAM, XTVERSION) but refuses pictures read from a file
+    // (`t=f`: EINVAL, unsupported medium), so the engine would draw the alt: it is not native.
+    const isNative = herdrTerminal === undefined && (program === 'ghostty' || term === 'xterm-ghostty' || term === 'xterm-kitty' || kittyWindow !== undefined)
     const isForced = /^(1|true|yes|on)$/i.test(forceImages ?? '')
     graphics = isNative ? 'file' : isForced ? 'bytes' : 'none'
     // Where the terminal cannot draw the picture itself, a card opens in a window of its own, by
