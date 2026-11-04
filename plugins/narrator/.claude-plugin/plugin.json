@@ -57,6 +57,31 @@
       "title": "Speak command",
       "description": "A program of your own to say each narration with, in place of the system's voice (macOS and Linux): the shell runs it with the narration as its last argument. Empty: the system's voice.",
       "default": ""
+    },
+    "server": {
+      "type": "string",
+      "title": "Speech server",
+      "description": "The address of any server with OpenAI's speech API, what comes before /audio/speech (https://api.openai.com/v1, or a local one as Kokoro-FastAPI's http://localhost:8880/v1), to say each narration with in place of the system's voice (macOS and Linux); the system's voice speaks when it does not answer. Empty: the system's voice.",
+      "default": ""
+    },
+    "serverVoice": {
+      "type": "string",
+      "title": "Speech server voice",
+      "description": "The voice the speech server speaks with (nova), or one per language beside one for the others (nova, es:ef_dora, fr:ff_siwis). Empty: alloy.",
+      "default": ""
+    },
+    "serverModel": {
+      "type": "string",
+      "title": "Speech server model",
+      "description": "The model the speech server is asked for (tts-1, gpt-4o-mini-tts, or the name your server gives its own).",
+      "default": "tts-1"
+    },
+    "serverKey": {
+      "type": "string",
+      "title": "Speech server key",
+      "description": "An API key, sent as a Bearer token, for a server that asks for one. Empty: none.",
+      "default": "",
+      "sensitive": true
     }
   }
 }
