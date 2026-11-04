@@ -48,6 +48,27 @@ A new prompt cuts the narration short. It stays on in your next sessions until y
 - **Windows**: Settings → Time & language → Speech → Add voices.
 - **Linux**: `sudo apt install speech-dispatcher espeak-ng`; for natural voices, set speech-dispatcher up with RHVoice or Piper.
 
+### An ONNX voice
+
+[`onnx/onnx-say`](onnx/onnx-say) is a Speak command (see Settings) that says each narration with an ONNX speech model, on your machine, with no server: Piper and other VITS models, Kokoro, Kitten or Matcha, read through [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx). It works on macOS and Linux and needs Python 3. No model comes with it: you pick one.
+
+1. Install it: `sh ~/.claude/plugins/cache/better-claude/narrator/*/onnx/install.sh`. It puts `onnx-say` and sherpa-onnx in `~/.local/share/narrator-onnx`, where a plugin update leaves them alone. sherpa-onnx stays at 1.13.8, the last one with espeak-ng inside: without it, 2.0 turns no text into speech with these models.
+2. Download a model from sherpa-onnx's [speech models](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models) and unpack it, one folder per model:
+
+   ```bash
+   mkdir -p ~/models && cd ~/models
+   curl -L https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-fr_FR-siwis-medium-int8.tar.bz2 | tar xj
+   ```
+
+   A Matcha model also takes its vocoder in its folder: a Vocos or HiFi-GAN `.onnx` from the [vocoder models](https://github.com/k2-fsa/sherpa-onnx/releases/tag/vocoder-models).
+3. Set the Speak command to `onnx-say` and its folders, one per language and one with no language for the others:
+
+   ```text
+   ~/.local/share/narrator-onnx/onnx-say fr=~/models/vits-piper-fr_FR-siwis-medium-int8 ~/models/kokoro-int8-multi-lang-v1_0#3
+   ```
+
+The family of a model is read from its `.onnx` file, so its folder can have any name. `#3` picks one voice of a model with several (Kokoro's 54, Kitten's 8; [sherpa-onnx's docs](https://k2-fsa.github.io/sherpa/onnx/tts/) list their IDs). The Speed setting is passed to the model. With no folder for the narration's language, or when the model fails, the engine's own voice says it.
+
 ## Install
 
 ```text
@@ -64,7 +85,7 @@ In `/config`:
 - **Speed**: how fast it speaks, as a multiple of the voice's normal pace, from `0.5` to `2`: `1.3` by default, a little quicker; `1` is the voice's own. The engine's voice, the last resort, keeps its own pace.
 - **Read short answers as they are**: an answer up to this many characters (200 by default) is read out as it is, with no Haiku call to retell it. `0`: Haiku narrates every answer.
 - **Model that writes the narration**: `haiku` by default.
-- **Speak command**: a program of your own to say each narration with, in place of the system's voice, on macOS and Linux (WSL too). The shell runs it with the narration as its last argument, so `my-tts --voice Mónica` runs `my-tts --voice Mónica "<narration>"`; it can also read `NARRATOR_TEXT` and `NARRATOR_LANG`, the narration and its language. It waits its turn in the line like any voice, and a new prompt ends it. The Voice and Speed settings are the program's to read (`NARRATOR_VOICE`, `NARRATOR_SPEED`). If it fails, the engine's own voice says the narration. On Windows it is left aside. Empty: the system's voice.
+- **Speak command**: a program of your own to say each narration with, in place of the system's voice, on macOS and Linux (WSL too). The shell runs it with the narration as its last argument, so `my-tts --voice Mónica` runs `my-tts --voice Mónica "<narration>"`; it can also read `NARRATOR_TEXT` and `NARRATOR_LANG`, the narration and its language. It waits its turn in the line like any voice, and a new prompt ends it. The Voice and Speed settings are the program's to read (`NARRATOR_VOICE`, `NARRATOR_SPEED`). If it fails, the engine's own voice says the narration. On Windows it is left aside. Empty: the system's voice. For a model of your own, see An ONNX voice.
 
 ## Several windows
 
@@ -79,6 +100,7 @@ One hooks module ([`hooks/register.tsx`](hooks/register.tsx)): a `ui.render` hoo
 ```bash
 claude plugin validate .   # from this folder
 claude plugin test .       # runs hooks/register.test.tsx against the engine
+node --test "onnx/test/*.test.js"   # onnx-say, with a stand-in model and player
 ```
 
 MIT © Miguel Ángel Durán (midudev)
