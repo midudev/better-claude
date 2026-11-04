@@ -198,6 +198,7 @@ export const register: Register = (on, options) => {
   lastTidied = ''
   const hideCycleHint = options.hideCycleHint !== false
   const hideInterruptHint = options.hideInterruptHint !== false
+  const showTimeMark = options.showTimeMark === true
   const rotateSeconds = Number(options.rotateSeconds)
   rotateMs = (rotateSeconds > 0 ? rotateSeconds : ROTATE_SECONDS) * 1000
   const display = DISPLAYS.includes(String(options.display)) ? String(options.display) : 'rotate'
@@ -262,7 +263,7 @@ export const register: Register = (on, options) => {
       const label = LABELS[limit.kind] ?? limit.kind
       const used = ` ${Math.round(percent)}%`
       const reset = resetsIn !== undefined && !hasReset ? ` ↻ ${until(resetsIn)}` : ''
-      const bar = barOf(filled, markOf(limit.kind, resetsIn))
+      const bar = barOf(filled, showTimeMark ? markOf(limit.kind, resetsIn) : undefined)
       return { kind: limit.kind, label, percent, bar, used, reset, short: widthOf(label + used) }
     })
     const below = widthOfNode(beneath, e.props.modes)
