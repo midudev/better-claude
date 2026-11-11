@@ -78,6 +78,15 @@ test('finds absolute, home, relative and bare paths, and cuts what a sentence ad
   expect(resolve('~/x', '/project/app', '/Users/ana')).toBe('/Users/ana/x')
 })
 
+test('a Windows path takes either slash, and one under a Windows folder keeps its drive', () => {
+  const found = (text: string) => pathsIn(text).map(({ start, end, target }) => [text.slice(start, end), target])
+  expect(found('Lo dejé en C:/Users/ana/x.mp4 y en C:\\Users\\ana\\y.md.')).toEqual([['C:/Users/ana/x.mp4', 'C:/Users/ana/x.mp4'], ['C:\\Users\\ana\\y.md', 'C:\\Users\\ana\\y.md']])
+  expect(pathOfSpan('C:/Users/ana/My Videos/a b.mp4')).toBe('C:/Users/ana/My Videos/a b.mp4')
+  expect(resolve('C:/Users/ana/x.mp4', 'C:\\project\\app', 'C:\\Users\\ana')).toBe('C:/Users/ana/x.mp4')
+  expect(resolve('../b/./c.txt', 'C:\\project\\app', 'C:\\Users\\ana')).toBe('C:/project/b/c.txt')
+  expect(resolve('~/x', 'C:\\project\\app', 'C:\\Users\\ana')).toBe('C:/Users/ana/x')
+})
+
 test('a path with a line names it; a file of code or text is known by its name, and its lines are tokens', () => {
   expect(lineOf('src/app.ts:42')).toBe(42)
   expect(lineOf('src/app.ts:42:7.')).toBe(42)
@@ -242,12 +251,32 @@ test('on Linux a click asks the file manager to select the path, with no window'
   expect(w.windows).toHaveLength(0)
 })
 
-test('under WSL a click selects the path in Explorer', async ($, on) => {
+// Explorer opens a file by running its default action, which for a script is running it: an
+// alt-click selects the file, as a click does.
+test('under WSL a click selects the path in Explorer, and so does an alt-click', async ($, on) => {
   const w = world(on, { system: 'Linux', env: { WSL_DISTRO_NAME: 'Ubuntu' } })
   await startSession($)
   const ui = await reply($, `Listo: ${VIDEO}`)
   await ui.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'path:0:0' })
   await ui.pointer({ type: 'up', x: 2, y: 0, button: 'left', in: 'path:0:0' })
   await w.clock.settle()
-  expect(w.runs).toContainEqual(['explorer.exe', '/select,C:\\Users\\ana\\videos\\borrador.mp4'])
+  await ui.pointer({ type: 'down', x: 2, y: 0, button: 'left', alt: true, in: 'path:0:0' })
+  await ui.pointer({ type: 'up', x: 2, y: 0, button: 'left', alt: true, in: 'path:0:0' })
+  await w.clock.settle()
+  const selected = ['explorer.exe', '/select,C:\\Users\\ana\\videos\\borrador.mp4']
+  expect(w.runs.filter(argv => argv[0] === 'explorer.exe')).toEqual([selected, selected])
+})
+
+test('on Windows a click selects the path in Explorer, and so does an alt-click', async ($, on) => {
+  const w = world(on, { env: { OS: 'Windows_NT' } })
+  await startSession($)
+  const ui = await reply($, `Listo: ${VIDEO}`)
+  await ui.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'path:0:0' })
+  await ui.pointer({ type: 'up', x: 2, y: 0, button: 'left', in: 'path:0:0' })
+  await w.clock.settle()
+  await ui.pointer({ type: 'down', x: 2, y: 0, button: 'left', alt: true, in: 'path:0:0' })
+  await ui.pointer({ type: 'up', x: 2, y: 0, button: 'left', alt: true, in: 'path:0:0' })
+  await w.clock.settle()
+  const selected = ['explorer', '/select,\\Users\\ana\\videos\\borrador.mp4']
+  expect(w.runs.filter(argv => argv[0] === 'explorer')).toEqual([selected, selected])
 })

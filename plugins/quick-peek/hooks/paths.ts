@@ -1,6 +1,7 @@
-// Finding the paths a text names: absolute (`/Users/…`), from home (`~/…`), relative (`./x`,
-// `src/x.ts`, `README.md`), each with an optional `:line` or `:line:column` after it. A path is
-// only a candidate here: the hooks module links the ones that lead to a file or folder.
+// Finding the paths a text names: absolute (`/Users/…`, or `C:\…` and `C:/…` on Windows), from
+// home (`~/…`), relative (`./x`, `src/x.ts`, `README.md`), each with an optional `:line` or
+// `:line:column` after it. A path is only a candidate here: the hooks module links the ones that
+// lead to a file or folder.
 
 /** A path a text names: where it starts and ends in the text, and the path itself, `:line` cut. */
 export type Found = { start: number; end: number; target: string }
@@ -15,14 +16,14 @@ const URL = /\b[a-z][a-z0-9+.-]*:\/\/[^\s<>()]+/gi
 const CANDIDATE = new RegExp(
   [
     String.raw`(?:~|\.{1,2})?\/[^\s\`'"<>()[\]{}|*]+`,
-    String.raw`[A-Za-z]:\\[^\s\`'"<>()[\]{}|*]+`,
+    String.raw`[A-Za-z]:[\\/][^\s\`'"<>()[\]{}|*]+`,
     String.raw`[\w@+-][\w@.+-]*(?:\/[\w@.+-]+)+\/?`,
     String.raw`[\w@+-][\w@.+-]*\.[A-Za-z][A-Za-z0-9]{0,9}`
   ].map(source => `(?<![\\w/.~:\\\\@-])(?:${source})(?::\\d+(?::\\d+)?)?`).join('|'),
   'g'
 )
 // A whole inline code span that is a path: it may hold spaces when it starts as a path does.
-const SPAN = /^(?:(?:~|\.{1,2})?\/|[A-Za-z]:\\)[^\n`]*[^\s`]$/
+const SPAN = /^(?:(?:~|\.{1,2})?\/|[A-Za-z]:[\\/])[^\n`]*[^\s`]$/
 
 /** The path `found` names, with what a sentence or a line number adds after it cut; none when nothing is left. */
 function clean (text: string) {
@@ -62,10 +63,12 @@ export function pathOfSpan (code: string): string | undefined {
 
 /**
  * Where `target` lands: home for `~`, the working folder for a relative path; `.` and `..`
- * folded, no trailing `/`. A Windows path stays as written.
+ * folded, no trailing `/`. A Windows path stays as written. One that lands under a Windows
+ * folder (`C:\Users\ana`, the home and working folder there) keeps its drive in front, its parts
+ * split at either slash: a `/` in front of the drive would put it on a drive of its own.
  */
 export function resolve (target: string, cwd: string, home: string | undefined) {
-  if (/^[A-Za-z]:\\/.test(target)) return target
+  if (/^[A-Za-z]:[\\/]/.test(target)) return target
   let path = target
   if (path === '~' || path.startsWith('~/')) {
     if (!home) return undefined
@@ -73,11 +76,12 @@ export function resolve (target: string, cwd: string, home: string | undefined) 
   } else if (!path.startsWith('/')) {
     path = `${cwd}/${path}`
   }
+  const drive = /^[A-Za-z]:[\\/]/.test(path) ? path.slice(0, 2) : ''
   const parts: string[] = []
-  for (const part of path.split('/')) {
+  for (const part of drive ? path.slice(2).split(/[\\/]/) : path.split('/')) {
     if (part === '' || part === '.') continue
     if (part === '..') parts.pop()
     else parts.push(part)
   }
-  return `/${parts.join('/')}`
+  return `${drive}/${parts.join('/')}`
 }
