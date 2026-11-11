@@ -314,12 +314,16 @@ function swap (drawn: RenderElement, mine: RenderElement): RenderElement {
   return isSwapped ? out : mine
 }
 
-/** Shows `path` in the system's file manager, selected; with `isOpening`, opens it instead. */
+/**
+ * Shows `path` in the system's file manager, selected; with `isOpening`, opens it instead. Not
+ * through Explorer: it opens a file by running its default action, and a `.js`, `.py` or `.bat`
+ * file's is to run it, so on Windows and under WSL an alt-click selects the file too.
+ */
 async function reveal ($: Engine, path: string, isOpening: boolean) {
   const run = (argv: string[]) => $.process.run(argv).catch(() => undefined)
   if (await wslOf($)) {
     const windows = (await run(['wslpath', '-w', path]))?.stdout.trim()
-    if (windows) await run(isOpening ? ['explorer.exe', windows] : ['explorer.exe', `/select,${windows}`])
+    if (windows) await run(['explorer.exe', `/select,${windows}`])
     return
   }
   const system = await platformOf($)
@@ -328,8 +332,7 @@ async function reveal ($: Engine, path: string, isOpening: boolean) {
     return
   }
   if (system === 'windows') {
-    const windows = path.replaceAll('/', '\\')
-    await run(isOpening ? ['explorer', windows] : ['explorer', `/select,${windows}`])
+    await run(['explorer', `/select,${path.replaceAll('/', '\\')}`])
     return
   }
   if (isOpening) {

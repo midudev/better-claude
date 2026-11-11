@@ -13,10 +13,10 @@ A Claude Code mod: the paths in Claude's replies become links. Hover one and a p
   The cut between them is set in src/timeline.ts:42       ← hover: its lines, 42 lit
 ```
 
-- **Which paths**: absolute (`/Users/…`), from home (`~/…`), relative (`./x`, `src/app.ts`, `README.md`: from the folder the shell is in, else from the project's, so they still lead somewhere after a `cd`), with or without backticks, and with a `:line` or `:line:column` after them. Only the paths that lead to a file or a folder become links; the rest stay as Claude wrote them. Inside backticks a path may hold spaces.
+- **Which paths**: absolute (`/Users/…`, or `C:\…` and `C:/…` on Windows), from home (`~/…`), relative (`./x`, `src/app.ts`, `README.md`: from the folder the shell is in, else from the project's, so they still lead somewhere after a `cd`), with or without backticks, and with a `:line` or `:line:column` after them. Only the paths that lead to a file or a folder become links; the rest stay as Claude wrote them. Inside backticks a path may hold spaces.
 - **Hover**: the path is underlined and a small window opens by the pointer, above it and to its right, without taking the focus: the file's Quick Look thumbnail (a video's frame, an image, a PDF's or a document's first page), else its icon; its name, its kind, size and age as your system words them, and the folder it is in. A folder shows its icon and its first entries. Move off the path and it closes.
 - **Code**: a file of code or text (`.js`, `.ts`, `.tsx`, `.html`, `.css`, `.json`, `.md`, `.py`, `.go`, `.rs`, `.sh`, `.yml`, a `Dockerfile`, a `.env` and many more) shows its first 20 lines instead, numbered and coloured, its language and how many lines it has under them. A path with a line (`src/app.ts:42`) shows the lines around it, that one lit.
-- **Click**: Finder opens the folder with the file selected (`open -R`). **Option-click** opens the file itself, with its app.
+- **Click**: Finder opens the folder with the file selected (`open -R`). **Option-click** opens the file itself, with its app. On Windows and WSL an alt-click selects the file too: Explorer opens a file by running its default action, and for a script that is running it.
 
 A path a row cannot hold is drawn in parts, cut after a `/`, and each part is the link. Hovering needs the mouse, so it needs Claude Code's fullscreen interface (`"tui": "fullscreen"` in your settings, or `/config`).
 
@@ -26,8 +26,8 @@ A path a row cannot hold is drawn in parts, cut after a `/`, and each part is th
 | --- | --- | --- |
 | macOS | Finder, the file selected | A window by the pointer, with the Quick Look thumbnail |
 | Linux | The file manager, the file selected (`org.freedesktop.FileManager1`), else its folder with `xdg-open` | A one-line card over the path: name, size, age; a file of code, its first 8 lines under it |
-| Windows | Explorer, the file selected (`explorer /select,`) | The card |
-| WSL | Windows' Explorer, the path turned into its Windows form by `wslpath -w` | The card |
+| Windows | Explorer, the file selected (`explorer /select,`), on an alt-click too | The card |
+| WSL | Windows' Explorer, the file selected, on an alt-click too; the path turned into its Windows form by `wslpath -w` | The card |
 
 Turn the window off with the **Preview in a window** option (`/config`) to get the card on macOS too. Over SSH the window would open on the other machine, so there the card shows.
 
