@@ -11,6 +11,8 @@ const VIDEO = '/Users/ana/videos/borrador.mp4'
 const FOLDER = '/Users/ana/videos'
 const README = '/project/app/README.md'
 const SOURCE = '/project/app/src/app.ts'
+const WIN_CWD = 'C:\\Users\\ana\\app'
+const WIN_SOURCE = 'C:\\Users\\ana\\app\\src\\app.ts'
 const CODE = ['import { run } from \'./run\'', '', '// Starts it', 'export async function start (port: number) {', '  const server = await run(port)', '  return server', '}', ''].join('\n')
 const SCREEN = { columns: 60, rows: 40, isFullscreen: true }
 
@@ -21,7 +23,7 @@ const SCREEN = { columns: 60, rows: 40, isFullscreen: true }
 function world (on: On, { system = 'Darwin', env = {}, cwd = '/project/app' }: { system?: string; env?: Record<string, string>; cwd?: string } = {}) {
   const clock = mock.clock(on, { now: 0 })
   mock.env(on, { HOME: '/Users/ana', ...env })
-  const there: Record<string, 'file' | 'dir'> = { [VIDEO]: 'file', [FOLDER]: 'dir', [README]: 'file', [SOURCE]: 'file' }
+  const there: Record<string, 'file' | 'dir'> = { [VIDEO]: 'file', [FOLDER]: 'dir', [README]: 'file', [SOURCE]: 'file', [WIN_SOURCE]: 'file' }
   const runs: string[][] = []
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: cwd }))
@@ -34,9 +36,9 @@ function world (on: On, { system = 'Darwin', env = {}, cwd = '/project/app' }: {
   on('fs.stat', ($, e) => {
     const kind = there[e.path]
     if (!kind) return { deny: `ENOENT: ${e.path}` }
-    return { value: { kind, size: e.path === SOURCE ? CODE.length : 12 * 1024 * 1024, mtimeMs: 0, isLink: false } }
+    return { value: { kind, size: e.path === SOURCE || e.path === WIN_SOURCE ? CODE.length : 12 * 1024 * 1024, mtimeMs: 0, isLink: false } }
   })
-  on('fs.read', ($, e) => (e.path === SOURCE ? { value: CODE } : { deny: `ENOENT: ${e.path}` }))
+  on('fs.read', ($, e) => (e.path === SOURCE || e.path === WIN_SOURCE ? { value: CODE } : { deny: `ENOENT: ${e.path}` }))
   // The window's program: it says `shown`, then `.` every tenth of a second till it is ended.
   const windows: { env: Record<string, string>; isEnded: boolean }[] = []
   on('process.spawn', async function * ($, e) {
@@ -76,6 +78,17 @@ test('finds absolute, home, relative and bare paths, and cuts what a sentence ad
   expect(pathOfSpan('npm run build')).toBeUndefined()
   expect(resolve('../b/./c.txt', '/project/app', '/Users/ana')).toBe('/project/b/c.txt')
   expect(resolve('~/x', '/project/app', '/Users/ana')).toBe('/Users/ana/x')
+})
+
+test('on Windows, paths land with backslashes: relative, from home, and written with either slash', () => {
+  expect(resolve('src/app.ts', WIN_CWD, 'C:\\Users\\ana')).toBe(WIN_SOURCE)
+  expect(resolve('..\\app\\src\\.\\app.ts', WIN_CWD, undefined)).toBe(WIN_SOURCE)
+  expect(resolve('~/app/src/app.ts', '/x', 'C:\\Users\\ana')).toBe(WIN_SOURCE)
+  expect(resolve('C:/Users/ana/app/src/app.ts', '/x', undefined)).toBe(WIN_SOURCE)
+  expect(resolve('C:\\..\\..', '/x', undefined)).toBe('C:\\')
+  const found = (text: string) => pathsIn(text).map(({ target }) => target)
+  expect(found('Está en C:/Users/ana/app/src/app.ts:5 y en C:\\Users\\ana\\x.md.')).toEqual(['C:/Users/ana/app/src/app.ts', 'C:\\Users\\ana\\x.md'])
+  expect(pathOfSpan('C:/Program Files/a b.txt')).toBe('C:/Program Files/a b.txt')
 })
 
 test('a path with a line names it; a file of code or text is known by its name, and its lines are tokens', () => {
@@ -229,6 +242,22 @@ test('without a window, the card of a file of code shows its first lines, colour
   expect(await ui.find({ type: 'Code' })).toMatchObject({ props: { source: CODE.trimEnd(), path: SOURCE, startLine: 1 } })
   expect(await ui.find({ key: 'card:0:0' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /app\.ts · \d+ B · .* ago · click: show in folder/ })).toBeDefined()
+})
+
+test('on Windows the preview is a window too: PowerShell, the script in the environment', async ($, on) => {
+  const w = world(on, { system: '', env: { OS: 'Windows_NT', USERPROFILE: 'C:\\Users\\ana' }, cwd: WIN_CWD })
+  await $.session.start({ cwd: WIN_CWD, surface: 'terminal', isInteractive: true })
+  const ui = await reply($, 'El arranque está en `src/app.ts:5`.')
+  expect(await ui.find({ key: 'path:0:0' })).toMatchObject({ props: { props: { path: WIN_SOURCE, line: 5 } } })
+  await ui.pointer({ type: 'enter', x: 0, y: 0, in: 'path:0:0' })
+  await w.clock.advance(100)
+  expect(w.windows).toHaveLength(1)
+  expect(w.windows[0]!.env).toMatchObject({ QUICK_PEEK_FILE: WIN_SOURCE, QUICK_PEEK_HINT: 'click: show in Explorer · Alt+click: open' })
+  expect(w.windows[0]!.env.QUICK_PEEK_PS).toContain('QuickPeekPopup')
+  expect(JSON.parse(w.windows[0]!.env.QUICK_PEEK_CODE!)).toMatchObject({ language: 'TypeScript', mark: 5 })
+  await ui.pointer({ type: 'leave', x: 3, y: 0, in: 'path:0:0' })
+  await w.clock.advance(300)
+  expect(w.windows[0]!.isEnded).toBe(true)
 })
 
 test('on Linux a click asks the file manager to select the path, with no window', async ($, on) => {
