@@ -576,6 +576,31 @@ test('on Linux with no display the terminal draws the card', async ($, on) => {
   expect(await ui.find({ key: 'image-1' })).toMatchObject({ type: 'Raster' })
 })
 
+test('in Ghostty on Linux with a display and Tk, the window comes first: Ghostty there may not draw the picture', async ($, on) => {
+  const w = world(on, { draft: '[Image #1]', system: 'Linux', env: { TERM_PROGRAM: 'ghostty', DISPLAY: ':0' } })
+  await startSession($)
+  await w.clock.settle()
+  await point(await band($), 'chip:1')
+  await w.clock.advance(100)
+  expect(w.windows[0]!.argv.slice(0, 2)).toEqual(['python3', '-c'])
+})
+
+test('in Ghostty on Linux with no display, Ghostty draws the card', async ($, on) => {
+  const w = world(on, { draft: '[Image #1]', system: 'Linux', env: { TERM_PROGRAM: 'ghostty' } })
+  await startSession($)
+  await w.clock.settle()
+  await point(await band($), 'chip:1')
+  expect(w.windows).toHaveLength(0)
+})
+
+test('in Ghostty on macOS, Ghostty draws the card: no window', async ($, on) => {
+  const w = world(on, { draft: '[Image #1]', env: { TERM_PROGRAM: 'ghostty' } })
+  await startSession($)
+  await w.clock.settle()
+  await point(await band($), 'chip:1')
+  expect(w.windows).toHaveLength(0)
+})
+
 // %TEMP%, as a path the engine under test (on macOS or Linux) can resolve.
 const TEMP = '/Users/me/AppData/Local/Temp'
 

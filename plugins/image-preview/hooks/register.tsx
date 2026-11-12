@@ -610,15 +610,19 @@ export const register: Register = (on, options) => {
       $.env.get('SSH_CONNECTION'),
       $.env.get('SSH_TTY')
     ])
-    const isNative = program === 'ghostty' || term === 'xterm-ghostty' || term === 'xterm-kitty' || kittyWindow !== undefined
+    const isGhostty = program === 'ghostty' || term === 'xterm-ghostty'
+    const isKitty = term === 'xterm-kitty' || kittyWindow !== undefined
     const isForced = /^(1|true|yes|on)$/i.test(forceImages ?? '')
-    graphics = isNative ? 'file' : isForced ? 'bytes' : 'none'
+    graphics = isGhostty || isKitty ? 'file' : isForced ? 'bytes' : 'none'
     // Where the terminal cannot draw the picture itself, a card opens in a window of its own, by
     // the pointer, on the desktop the session runs on: not over SSH, where that is another machine's.
     windowing = undefined
     const isRemote = sshConnection !== undefined || sshTty !== undefined
-    if (options.window !== false && graphics === 'none' && e.isInteractive && !isRemote) {
-      const system = await platformOf($)
+    const system = await platformOf($)
+    // Ghostty on Linux is handed the picture but may not draw it (#57): there the window comes
+    // first, and the terminal's own drawing stays for when no window can open.
+    const prefersWindow = graphics === 'none' || (isGhostty && !isKitty && system === 'linux')
+    if (options.window !== false && prefersWindow && e.isInteractive && !isRemote) {
       if (system === 'macos' || system === 'windows') windowing = system
       // Under WSL the window is Windows', by the pointer: not WSLg's, which cannot tell where it is.
       if (await wslOf($)) windowing = 'windows'
