@@ -1,7 +1,7 @@
 {
   "name": "quick-peek",
-  "version": "0.2.0",
-  "description": "The paths in Claude's replies become links: hover one to preview it, click it to show it in Finder.",
+  "version": "0.2.1",
+  "description": "The paths in Claude's replies become links: hover one to preview it in a window by the pointer (macOS and Windows), click it to show it in Finder or Explorer.",
   "author": {
     "name": "Miguel Ángel Durán (midudev)",
     "url": "https://github.com/midudev"
@@ -21,7 +21,7 @@
     "window": {
       "type": "boolean",
       "title": "Preview in a window",
-      "description": "On macOS, show the preview in a small window by the pointer: the file's Quick Look thumbnail, its kind, size and age. Off, the terminal shows a one-line card over the path.",
+      "description": "Show the preview in a small window by the pointer: on macOS the file's Quick Look thumbnail, on Windows Explorer's thumbnail or icon, or a file's lines of code; with its kind, size and age. Off, the terminal shows a one-line card over the path.",
       "default": true
     }
   }
