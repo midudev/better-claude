@@ -1,6 +1,6 @@
 // Mod tests, run against the engine itself: `claude plugin test .`
 import { expect, mock, test } from 'claude-code/testing'
-import type { Engine } from 'claude-code/testing'
+import type { Engine, Plugin } from 'claude-code/testing'
 import type { On, SessionRateLimit } from 'claude-code'
 
 const NOW = Date.parse('2026-10-12T10:00:00Z')
@@ -31,7 +31,33 @@ function world (on: On, rateLimits: SessionRateLimit[] = LIMITS) {
     if ('hint' in e.props) return <Text>{e.props.hint}</Text>
     return e.props.modes.length > 0 ? <Box key="engine" /> : ({ type: 'engine', ref: 0 } as const)
   })
-  return { clock, store }
+  // The conversation a /clear starts holds none of the last one's values, until the mod writes them again.
+  let isCleared = false
+  on('state.get', { plugin: 'sub-meter', key: 'limits' }, async ($, e, next) => {
+    const answer = await next(e)
+    if (!isCleared || answer.value === undefined) return answer
+    return { value: { ...answer.value, value: undefined } }
+  })
+  on('state.set', { plugin: 'sub-meter', key: 'limits' }, ($, e, next) => {
+    isCleared = false
+    return next(e)
+  })
+  /** A /clear: the session ends, the next conversation starts empty, and SessionStart says so. */
+  async function clear ($: Engine) {
+    await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
+    isCleared = true
+    await $.classic.SessionStart({ source: 'clear' })
+  }
+  return { clock, store, clear }
+}
+
+// The built-in that runs first and sends classic.SessionStart on past every plugin a person installs.
+const SEC_DEFAULT: Plugin = {
+  name: 'sec-default',
+  tier: 'prepend',
+  register (on) {
+    on('classic.SessionStart', ($, e, next) => next.to(e, 'builtin'))
+  }
 }
 
 const startSession = ($: Engine) => $.session.start({ cwd: '/project', surface: 'terminal', isInteractive: true })
@@ -132,15 +158,10 @@ test('ignores a reading in the shared store that is older than its own', { optio
   expect(await (await footer($)).find({ type: 'Text', text: ' 58%' })).toBeDefined()
 })
 
-const clear = async ($: Engine) => {
-  await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
-  await $.classic.SessionStart({ source: 'clear' })
-}
-
-test('after a /clear the meter is drawn again and keeps taking turns', async ($, on) => {
+test('after a /clear the meter is drawn again and keeps taking turns', { plugins: [SEC_DEFAULT] }, async ($, on) => {
   const w = world(on)
   await startSession($)
-  await clear($)
+  await w.clear($)
   expect(await (await footer($)).find({ type: 'Text', text: '5h' })).toBeDefined()
   await w.clock.advance(8000)
   expect(await (await footer($)).find({ type: 'Text', text: 'week' })).toBeDefined()
@@ -148,10 +169,10 @@ test('after a /clear the meter is drawn again and keeps taking turns', async ($,
   expect(await (await footer($)).find({ type: 'Text', text: '5h' })).toBeDefined()
 })
 
-test('after a /clear it still adopts the readings of other sessions', { options: { display: 'session' } }, async ($, on) => {
+test('after a /clear it still adopts the readings of other sessions', { plugins: [SEC_DEFAULT], options: { display: 'session' } }, async ($, on) => {
   const w = world(on)
   await startSession($)
-  await clear($)
+  await w.clear($)
   w.store.limits = [{ ...LIMITS[0], percentUsed: 91 }, LIMITS[1]]
   w.store.at = NOW + 1000
   await w.clock.advance(8000)
