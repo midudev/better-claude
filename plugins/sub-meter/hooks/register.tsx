@@ -36,7 +36,8 @@ const BENEATH_FLOOR = 10
 let hintWidth = 0
 let lastHint = ''
 let lastTidied = ''
-let windowCount = 0
+// The reading this process last took or adopted: what the meter draws while a /clear's new conversation holds none.
+let reading: Limit[] = []
 let tickTimer: { cancel: () => void } | undefined
 let rotateTimer: { cancel: () => void } | undefined
 
@@ -96,7 +97,7 @@ let seenAt = 0
 async function remember ($: EngineInterface, found: Limit[]) {
   if (found.length === 0) return
   seenAt = await $.clock.now()
-  windowCount = found.length
+  reading = found
   await update($, limits, () => found)
   await $.store.set('limits', found)
   await $.store.set('at', seenAt) // after the limits, so a reader that sees the new time finds the new limits
@@ -109,7 +110,7 @@ async function syncFromStore ($: EngineInterface) {
   const saved = await $.store.get('limits')
   if (!Array.isArray(saved)) return
   seenAt = at
-  windowCount = saved.length
+  reading = saved as Limit[]
   await update($, limits, () => saved as Limit[])
 }
 
@@ -135,7 +136,7 @@ async function begin ($: EngineInterface) {
     $.session.usage()
   ])
   if (Array.isArray(saved)) {
-    windowCount = saved.length
+    reading = saved as Limit[]
     await update($, limits, () => saved as Limit[])
   }
   seenAt = Number(storedAt) || 0
@@ -146,11 +147,11 @@ async function begin ($: EngineInterface) {
     // Another session's reading shows up within TICK_MS of being stored.
     tickTimer = $.clock.every(TICK_MS, () => {
       void syncFromStore($).catch(() => {}) // a failed read keeps the reading on screen
-      if (windowCount > 0) void update($, tick, n => n + 1)
+      if (reading.length > 0) void update($, tick, n => n + 1)
     })
     if (isRotating) {
       rotateTimer = $.clock.every(rotateMs, () => {
-        if (windowCount >= 2) void update($, view, n => n + 1)
+        if (reading.length >= 2) void update($, view, n => n + 1)
       })
     }
   }
@@ -165,7 +166,7 @@ function visible (all: Limit[], display: string, index: number): Limit[] {
 
 export const register: Register = (on, options) => {
   seenAt = 0
-  windowCount = 0
+  reading = []
   lastHint = ''
   lastTidied = ''
   const hideCycleHint = options.hideCycleHint !== false
@@ -195,16 +196,14 @@ export const register: Register = (on, options) => {
   })
 
   // A /clear ends the conversation, not the process: no session.start follows it, so the timers stay,
-  // and the next tick adopts the stored reading again in the new session.
+  // and the next tick adopts the stored reading again in the new session. Until then the meter draws
+  // the reading this process holds, as the new conversation holds none of the last one's values.
   on('session.end', ($, e, next) => {
     if (e.reason === 'clear') seenAt = 0
-    else stopTimers()
-    return next(e)
-  })
-
-  // The conversation a /clear starts holds none of the last one's values: the meter is drawn again at once.
-  on('classic.SessionStart', async ($, e, next) => {
-    if (e.source === 'clear') await begin($).catch(() => {})
+    else {
+      stopTimers()
+      reading = []
+    }
     return next(e)
   })
 
@@ -217,7 +216,8 @@ export const register: Register = (on, options) => {
   // another plugin's switch), so a plugin that draws itself last stays last whichever wraps the other.
   // Where the row is short the meter gives up its bar, then the time until the reset, then itself.
   on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
-    const all = await read($, limits)
+    const stored = await read($, limits)
+    const all = stored.length > 0 ? stored : reading
     if (all.length === 0) return next(e)
     const index = display === 'rotate' && all.length >= 2 ? await read($, view) : 0
     const shown = visible(all, display, index)
