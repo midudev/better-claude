@@ -5,7 +5,7 @@ import type { Excerpt } from './code'
 import { blocks, inline, items, markerOf, widthOf, wrap } from './markdown'
 import type { Item, Row, Run } from './markdown'
 import { lineOf, pathOfSpan, pathsIn, resolve } from './paths'
-import { MACOS } from './window'
+import { MACOS, explorer } from './window'
 
 type Engine = EngineInterface
 type Ui = Elements['terminal']
@@ -328,8 +328,10 @@ async function reveal ($: Engine, path: string, isOpening: boolean) {
     return
   }
   if (system === 'windows') {
-    const windows = path.replaceAll('/', '\\')
-    await run(isOpening ? ['explorer', windows] : ['explorer', `/select,${windows}`])
+    // A folder opens in its own window: selected, it would show in its parent's.
+    const isFolder = (await statOf($, path))?.kind === 'dir'
+    const { argv, env } = explorer(path.replaceAll('/', '\\'), isOpening || isFolder)
+    await $.process.run(argv, { env }).catch(() => undefined)
     return
   }
   if (isOpening) {

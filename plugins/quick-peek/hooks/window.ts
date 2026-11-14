@@ -242,3 +242,38 @@ function run () {
   }
 }
 `
+
+const encodedCache = new Map<string, string>()
+
+/** A PowerShell script as `-EncodedCommand` takes it: UTF-16LE, base64. */
+function encodedCommand (script: string) {
+  const cached = encodedCache.get(script)
+  if (cached !== undefined) return cached
+  const bytes = new Uint8Array(script.length * 2)
+  for (let i = 0; i < script.length; i++) {
+    const code = script.charCodeAt(i)
+    bytes[i * 2] = code & 0xff
+    bytes[i * 2 + 1] = code >> 8
+  }
+  const encoded = bytes.toBase64()
+  encodedCache.set(script, encoded)
+  return encoded
+}
+
+// Explorer takes `/select,` and the path as one argument, with quotes around the path alone.
+// PowerShell hands it that line as written (QUICK_PEEK_ARGS), and asks for a window shown.
+const EXPLORER = String.raw`Start-Process explorer.exe -WindowStyle Normal -ArgumentList $env:QUICK_PEEK_ARGS`
+
+/**
+ * How Windows' Explorer is asked for `path`, a Windows path: opened (a folder in a window, a
+ * file with its app), or its folder shown with it selected. Always through PowerShell:
+ * Explorer run straight from the engine, whose programs start hidden, opens a hidden window;
+ * and an argument that holds a space is quoted whole, and Explorer, given
+ * `"/select,C:\My Videos\a.mp4"`, opens Documents. A Windows path holds no quote.
+ */
+export function explorer (path: string, isOpening: boolean): { argv: string[]; env: Record<string, string> } {
+  return {
+    argv: ['powershell', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encodedCommand(EXPLORER)],
+    env: { QUICK_PEEK_ARGS: isOpening ? `"${path}"` : `/select,"${path}"` }
+  }
+}
