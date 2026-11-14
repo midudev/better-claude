@@ -96,17 +96,15 @@ test('from a Windows folder a path lands on a Windows path; the form Git Bash wr
   expect(resolve('/c/Users/ana', '/project/app', '/Users/ana')).toBe('/c/Users/ana')
 })
 
-test('on Windows, Explorer selects a file, through PowerShell when its path holds a space or a comma, and opens a folder', () => {
-  expect(explorer('C:\\Users\\ana\\videos\\borrador.mp4', false)).toEqual({ argv: ['explorer', '/select,C:\\Users\\ana\\videos\\borrador.mp4'] })
-  expect(explorer('C:\\Users\\ana\\My Videos', true)).toEqual({ argv: ['explorer', 'C:\\Users\\ana\\My Videos'] })
-  for (const path of ['C:\\Users\\ana\\My Videos\\a b.mp4', 'C:\\Users\\ana\\a,b.mp4']) {
-    const { argv, env } = explorer(path, false)
-    expect(argv.slice(0, -1)).toEqual(['powershell', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand'])
-    // The script, as `-EncodedCommand` takes it: UTF-16LE, base64.
-    const bytes = Uint8Array.fromBase64(argv.at(-1)!)
-    expect(String.fromCharCode(...bytes.filter((_, i) => i % 2 === 0))).toBe('Start-Process explorer.exe -ArgumentList (\'/select,"\' + $env:QUICK_PEEK_FILE + \'"\')')
-    expect(env).toEqual({ QUICK_PEEK_FILE: path })
-  }
+test('on Windows, Explorer is asked through PowerShell, for a window shown: a file selected, a folder opened', () => {
+  const file = 'C:\\Users\\ana\\My Videos\\a, b.mp4'
+  const { argv, env } = explorer(file, false)
+  expect(argv.slice(0, -1)).toEqual(['powershell', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand'])
+  // The script, as `-EncodedCommand` takes it: UTF-16LE, base64.
+  const bytes = Uint8Array.fromBase64(argv.at(-1)!)
+  expect(String.fromCharCode(...bytes.filter((_, i) => i % 2 === 0))).toBe('Start-Process explorer.exe -WindowStyle Normal -ArgumentList $env:QUICK_PEEK_ARGS')
+  expect(env).toEqual({ QUICK_PEEK_ARGS: `/select,"${file}"` })
+  expect(explorer('C:\\Users\\ana\\My Videos', true).env).toEqual({ QUICK_PEEK_ARGS: '"C:\\Users\\ana\\My Videos"' })
 })
 
 test('a path with a line names it; a file of code or text is known by its name, and its lines are tokens', () => {

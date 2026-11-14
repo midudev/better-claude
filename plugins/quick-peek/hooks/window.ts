@@ -261,20 +261,19 @@ function encodedCommand (script: string) {
 }
 
 // Explorer takes `/select,` and the path as one argument, with quotes around the path alone.
-// PowerShell hands it that line as written, the path read from the environment (QUICK_PEEK_FILE).
-const SELECT = String.raw`Start-Process explorer.exe -ArgumentList ('/select,"' + $env:QUICK_PEEK_FILE + '"')`
+// PowerShell hands it that line as written (QUICK_PEEK_ARGS), and asks for a window shown.
+const EXPLORER = String.raw`Start-Process explorer.exe -WindowStyle Normal -ArgumentList $env:QUICK_PEEK_ARGS`
 
 /**
  * How Windows' Explorer is asked for `path`, a Windows path: opened (a folder in a window, a
- * file with its app), or its folder shown with it selected. An argument that holds a space is
- * quoted whole when it is run, and Explorer, given `"/select,C:\My Videos\a.mp4"`, opens
- * Documents: such a path, or one with a comma, goes through PowerShell.
+ * file with its app), or its folder shown with it selected. Always through PowerShell:
+ * Explorer run straight from the engine, whose programs start hidden, opens a hidden window;
+ * and an argument that holds a space is quoted whole, and Explorer, given
+ * `"/select,C:\My Videos\a.mp4"`, opens Documents. A Windows path holds no quote.
  */
-export function explorer (path: string, isOpening: boolean): { argv: string[]; env?: Record<string, string> } {
-  if (isOpening) return { argv: ['explorer', path] }
-  if (!/[\s,]/.test(path)) return { argv: ['explorer', `/select,${path}`] }
+export function explorer (path: string, isOpening: boolean): { argv: string[]; env: Record<string, string> } {
   return {
-    argv: ['powershell', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encodedCommand(SELECT)],
-    env: { QUICK_PEEK_FILE: path }
+    argv: ['powershell', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encodedCommand(EXPLORER)],
+    env: { QUICK_PEEK_ARGS: isOpening ? `"${path}"` : `/select,"${path}"` }
   }
 }

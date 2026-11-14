@@ -331,7 +331,7 @@ async function reveal ($: Engine, path: string, isOpening: boolean) {
     // A folder opens in its own window: selected, it would show in its parent's.
     const isFolder = (await statOf($, path))?.kind === 'dir'
     const { argv, env } = explorer(path.replaceAll('/', '\\'), isOpening || isFolder)
-    await $.process.run(argv, env && { env }).catch(() => undefined)
+    await $.process.run(argv, { env }).catch(() => undefined)
     return
   }
   if (isOpening) {
