@@ -26,7 +26,7 @@ A path a row cannot hold is drawn in parts, cut after a `/`, and each part is th
 | --- | --- | --- |
 | macOS | Finder, the file selected | A window by the pointer, with the Quick Look thumbnail |
 | Linux | The file manager, the file selected (`org.freedesktop.FileManager1`), else its folder with `xdg-open` | A one-line card over the path: name, size, age; a file of code, its first 8 lines under it |
-| Windows | Explorer, the file selected (`explorer /select,`) | The card |
+| Windows | Explorer, the file selected (`explorer /select,`, through PowerShell when the path holds a space or a comma); a folder opened in its own window. Paths in Windows form (`C:\Users\…`), relative, from home, and as Git Bash writes them (`/c/Users/…`) | The card |
 | WSL | Windows' Explorer, the path turned into its Windows form by `wslpath -w` | The card |
 
 Turn the window off with the **Preview in a window** option (`/config`) to get the card on macOS too. Over SSH the window would open on the other machine, so there the card shows.

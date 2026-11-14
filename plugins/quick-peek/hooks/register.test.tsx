@@ -6,6 +6,7 @@ import type { On } from 'claude-code'
 import { excerptOf, languageOf, tokenize } from './code'
 import { blocks, inline, items, wrap } from './markdown'
 import { lineOf, pathOfSpan, pathsIn, resolve } from './paths'
+import { explorer } from './window'
 
 const VIDEO = '/Users/ana/videos/borrador.mp4'
 const FOLDER = '/Users/ana/videos'
@@ -76,6 +77,36 @@ test('finds absolute, home, relative and bare paths, and cuts what a sentence ad
   expect(pathOfSpan('npm run build')).toBeUndefined()
   expect(resolve('../b/./c.txt', '/project/app', '/Users/ana')).toBe('/project/b/c.txt')
   expect(resolve('~/x', '/project/app', '/Users/ana')).toBe('/Users/ana/x')
+})
+
+test('from a Windows folder a path lands on a Windows path; the form Git Bash writes names its drive', () => {
+  const app = 'C:\\Users\\ana\\app'
+  const home = 'C:\\Users\\ana'
+  expect(resolve('README.md', app, home)).toBe('C:\\Users\\ana\\app\\README.md')
+  expect(resolve('src/app.ts', 'C:/Users/ana/app', home)).toBe('C:\\Users\\ana\\app\\src\\app.ts')
+  expect(resolve('../b/./c.txt', app, home)).toBe('C:\\Users\\ana\\b\\c.txt')
+  expect(resolve('~/My Videos/a b.mp4', app, home)).toBe('C:\\Users\\ana\\My Videos\\a b.mp4')
+  expect(resolve('~/x', app, undefined)).toBeUndefined()
+  expect(resolve('~/x', app, '/c/Users/ana')).toBe('C:\\Users\\ana\\x')
+  expect(resolve('/c/Users/ana/x.mp4', 'D:\\app', home)).toBe('C:\\Users\\ana\\x.mp4')
+  expect(resolve('/Users/ana/x.mp4', 'D:\\app', home)).toBe('D:\\Users\\ana\\x.mp4')
+  expect(resolve('../../../..', app, home)).toBe('C:\\')
+  expect(resolve('D:\\videos\\a.mp4', app, home)).toBe('D:\\videos\\a.mp4')
+  // Elsewhere a path from the root stays one.
+  expect(resolve('/c/Users/ana', '/project/app', '/Users/ana')).toBe('/c/Users/ana')
+})
+
+test('on Windows, Explorer selects a file, through PowerShell when its path holds a space or a comma, and opens a folder', () => {
+  expect(explorer('C:\\Users\\ana\\videos\\borrador.mp4', false)).toEqual({ argv: ['explorer', '/select,C:\\Users\\ana\\videos\\borrador.mp4'] })
+  expect(explorer('C:\\Users\\ana\\My Videos', true)).toEqual({ argv: ['explorer', 'C:\\Users\\ana\\My Videos'] })
+  for (const path of ['C:\\Users\\ana\\My Videos\\a b.mp4', 'C:\\Users\\ana\\a,b.mp4']) {
+    const { argv, env } = explorer(path, false)
+    expect(argv.slice(0, -1)).toEqual(['powershell', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand'])
+    // The script, as `-EncodedCommand` takes it: UTF-16LE, base64.
+    const bytes = Uint8Array.fromBase64(argv.at(-1)!)
+    expect(String.fromCharCode(...bytes.filter((_, i) => i % 2 === 0))).toBe('Start-Process explorer.exe -ArgumentList (\'/select,"\' + $env:QUICK_PEEK_FILE + \'"\')')
+    expect(env).toEqual({ QUICK_PEEK_FILE: path })
+  }
 })
 
 test('a path with a line names it; a file of code or text is known by its name, and its lines are tokens', () => {
