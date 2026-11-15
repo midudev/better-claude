@@ -11,6 +11,7 @@ const VIDEO = '/Users/ana/videos/borrador.mp4'
 const FOLDER = '/Users/ana/videos'
 const README = '/project/app/README.md'
 const SOURCE = '/project/app/src/app.ts'
+const HIDDEN = '/project/app/.github/workflows/ci.yml'
 const CODE = ['import { run } from \'./run\'', '', '// Starts it', 'export async function start (port: number) {', '  const server = await run(port)', '  return server', '}', ''].join('\n')
 const SCREEN = { columns: 60, rows: 40, isFullscreen: true }
 
@@ -21,7 +22,7 @@ const SCREEN = { columns: 60, rows: 40, isFullscreen: true }
 function world (on: On, { system = 'Darwin', env = {}, cwd = '/project/app' }: { system?: string; env?: Record<string, string>; cwd?: string } = {}) {
   const clock = mock.clock(on, { now: 0 })
   mock.env(on, { HOME: '/Users/ana', ...env })
-  const there: Record<string, 'file' | 'dir'> = { [VIDEO]: 'file', [FOLDER]: 'dir', [README]: 'file', [SOURCE]: 'file' }
+  const there: Record<string, 'file' | 'dir'> = { [VIDEO]: 'file', [FOLDER]: 'dir', [README]: 'file', [SOURCE]: 'file', [HIDDEN]: 'file' }
   const runs: string[][] = []
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: cwd }))
@@ -72,6 +73,10 @@ test('finds absolute, home, relative and bare paths, and cuts what a sentence ad
   expect(found('Mira src/app.ts:42 y README.md (la raíz).')).toEqual([['src/app.ts:42', 'src/app.ts'], ['README.md', 'README.md']])
   expect(found('see https://example.com/a/b.html and/or 1/2')).toEqual([['and/or', 'and/or'], ['1/2', '1/2']])
   expect(found('a word, then this')).toEqual([])
+  // A hidden folder or file starts with a dot; an ellipsis, a number or `..x` names none.
+  expect(found('Ver .github/ci.yml, .env.local y ./.agents/a.md.')).toEqual([['.github/ci.yml', '.github/ci.yml'], ['.env.local', '.env.local'], ['./.agents/a.md', './.agents/a.md']])
+  expect(found('Y entonces... .5 o ..x/y')).toEqual([])
+  expect(pathOfSpan('.github/workflows/ci.yml:3')).toBe('.github/workflows/ci.yml')
   expect(pathOfSpan('~/My Videos/a b.mp4')).toBe('~/My Videos/a b.mp4')
   expect(pathOfSpan('npm run build')).toBeUndefined()
   expect(resolve('../b/./c.txt', '/project/app', '/Users/ana')).toBe('/project/b/c.txt')
@@ -138,6 +143,14 @@ test('after a `cd` into a folder of the project, a relative path leads from ther
   expect(await ui.find({ key: 'path:0:0' })).toMatchObject({ props: { props: { label: 'src/app.ts', path: SOURCE } } })
   expect(await ui.find({ key: 'path:1:0' })).toMatchObject({ props: { props: { label: 'app.ts', path: SOURCE } } })
   expect(await ui.find({ key: 'path:2:0' })).toMatchObject({ props: { props: { label: 'README.md', path: README } } })
+})
+
+test('a path into a hidden folder of the project is a link, in plain text or in backticks', async ($, on) => {
+  world(on)
+  await startSession($)
+  const ui = await reply($, 'El flujo está en .github/workflows/ci.yml y en `.github/workflows/ci.yml:3`')
+  expect(await ui.find({ key: 'path:0:0' })).toMatchObject({ props: { props: { label: '.github/workflows/ci.yml', path: HIDDEN } } })
+  expect(await ui.find({ key: 'path:1:0' })).toMatchObject({ props: { props: { path: HIDDEN } } })
 })
 
 test('a reply naming no path that is there is the engine\'s, and so is one off fullscreen', async ($, on) => {
