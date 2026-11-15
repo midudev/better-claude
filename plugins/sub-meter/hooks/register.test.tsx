@@ -308,9 +308,16 @@ test('what a switch beneath gives up is not taken back: the meter only shrinks a
   expect(await texts(await footer($, [], 35))).toEqual(['⏵'])
 })
 
-test('off the terminal the meter is drawn whole', async ($, on) => {
+test('on the desktop, which shows the usage itself, the engine draws its own footer', async ($, on) => {
   world(on)
   await startSession($)
-  const ui = await $.ui.mount({ plugin: 'sub-meter', surface: 'desktop', component: 'SessionMode', props: { modes: [] }, viewport: { columns: 30, rows: 30 } })
-  expect(await ui.find({ type: 'Text', text: ' ━━━━━━' })).toBeDefined()
+  const ui = await $.ui.mount({ plugin: 'sub-meter', surface: 'desktop', component: 'SessionMode', props: { modes: ['focus'] } })
+  expect(await ui.find({ key: 'engine' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '5h' })).toBeUndefined()
+})
+
+test('on the desktop the hint line stays as it is', async ($, on) => {
+  world(on)
+  const ui = await $.ui.mount({ plugin: 'sub-meter', surface: 'desktop', component: 'PromptHint', props: { isDraft: false, isWorking: true, hint: 'esc to interrupt' } })
+  expect(await ui.find({ type: 'Text', text: 'esc to interrupt' })).toBeDefined()
 })

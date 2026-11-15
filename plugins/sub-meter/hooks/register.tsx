@@ -216,7 +216,9 @@ export const register: Register = (on, options) => {
   // Bottom right of the prompt footer: the meter, then what is beneath it (the engine's mode labels,
   // another plugin's switch), so a plugin that draws itself last stays last whichever wraps the other.
   // Where the row is short the meter gives up its bar, then the time until the reset, then itself.
+  // The desktop app shows the subscription usage itself, so there the footer stays as it is.
   on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
+    if (e.surface !== 'terminal') return next(e)
     const all = await read($, limits)
     if (all.length === 0) return next(e)
     const index = display === 'rotate' && all.length >= 2 ? await read($, view) : 0
@@ -272,18 +274,18 @@ export const register: Register = (on, options) => {
 
   // The engine draws the mode label itself; the hint line after it starts with "(shift+tab to cycle)",
   // and while Claude works holds "esc to interrupt". Its width tells the meter how much room is left.
+  // Off the terminal there is no meter to make room for: the line stays as it is.
   on('ui.render', { component: 'PromptHint' }, ($, e, next) => {
+    if (e.surface !== 'terminal') return next(e)
     if (e.props.hint !== lastHint) {
       lastHint = e.props.hint
       lastTidied = tidy(e.props.hint)
     }
     const hint = lastTidied
-    if (e.surface === 'terminal') {
-      const width = widthOf(hint)
-      if (width !== hintWidth) {
-        hintWidth = width
-        $.ui.invalidate('ui.render')
-      }
+    const width = widthOf(hint)
+    if (width !== hintWidth) {
+      hintWidth = width
+      $.ui.invalidate('ui.render')
     }
     return hint === e.props.hint ? next(e) : next({ ...e, props: { ...e.props, hint } })
   })

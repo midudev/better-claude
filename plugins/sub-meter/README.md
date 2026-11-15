@@ -17,9 +17,9 @@ Where the footer is short it fits the row instead of breaking to a second line: 
 ⏵⏵ auto mode on ·           5h 58% · ⏵ narrator
 ```
 
-There is no monthly window: Claude Code only reports the 5-hour and the weekly ones. Off a subscription (API key billing) there is nothing to show, so the footer stays as it is.
+There is no monthly window: Claude Code only reports the 5-hour and the weekly ones. Off a subscription (API key billing) there is nothing to show, so the footer stays as it is. The same in the Claude desktop app, which already shows the subscription usage itself: there the meter is the terminal's alone.
 
-While it is on, it also drops the `(shift+tab to cycle)` hint after the permission mode and `esc to interrupt` while Claude works, to leave room for the meter. Turn either off in `/config` (`hideCycleHint`, `hideInterruptHint`).
+While it is on, in the terminal it also drops the `(shift+tab to cycle)` hint after the permission mode and `esc to interrupt` while Claude works, to leave room for the meter. Turn either off in `/config` (`hideCycleHint`, `hideInterruptHint`).
 
 ## Install
 
