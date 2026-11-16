@@ -5,7 +5,7 @@ import type { Excerpt } from './code'
 import { blocks, inline, items, markerOf, widthOf, wrap } from './markdown'
 import type { Item, Row, Run } from './markdown'
 import { lineOf, pathOfSpan, pathsIn, resolve } from './paths'
-import { MACOS } from './window'
+import { MACOS, WINDOWS, WINDOWS_BUILD, WINDOWS_OPEN, WINDOWS_REVEAL, WINDOWS_TYPES, powershell } from './window'
 
 type Engine = EngineInterface
 type Ui = Elements['terminal']
@@ -35,13 +35,24 @@ const FOUND_MS = 30_000
 const MISSING_MS = 3_000
 const PLAN_MS = 10_000
 const PLANS = 300
-// The longest side of the preview's picture, in points, and the most seconds the window stays.
+// The longest side of the preview's picture, in points, and the most seconds the window stays; the
+// line under it that says what a click does, by system.
 const WINDOW_SIZE = 360
 const WINDOW_LIFE = 60
+const WINDOW_HINT = { macos: 'click: show in Finder · ⌥ click: open', windows: 'click: show in Explorer · Alt click: open' }
+// How long the pointer rests on a path before its window opens: crossing a list of paths opens
+// none. How long a window stays once the pointer left its path, in case it comes back. How many
+// programs in a row may fail to start before the terminal shows the cards.
+const OPEN_MS = 150
+const LEAVE_MS = 200
+const FAILURES = 3
 // The largest file of code or text read for its lines; the lines the window shows, the lines and
 // columns a card shows.
 const CODE_BYTES = 1024 * 1024
 const WINDOW_LINES = 20
+// The most characters the window's lines may take as QUICK_PEEK_CODE: Windows holds 32,767 in a
+// variable, its name and `=` among them.
+const CODE_CHARS = 32_000
 const CARD_LINES = 8
 const CARD_COLUMNS = 100
 
@@ -50,11 +61,18 @@ const plans = new Map<string, { plan: Plan | null; at: number }>()
 const excerpts = new Map<string, Excerpt | null>()
 let platform: Promise<Platform> | undefined
 let wsl: Promise<boolean> | undefined
-// Whether a hover opens a window by the pointer (macOS); else each path carries a card the
-// terminal reveals over it. The path the pointer is on, and the part it is on; the window open.
-let windowing = false
+let windowsRoot: Promise<string> | undefined
+// The system whose window a hover opens by the pointer (macOS, Windows); else none, and each path
+// carries a card the terminal reveals over it. The path the pointer is on, and the part it is on;
+// the window open; how many programs in a row ended without showing one. On Windows, where the
+// compiled window is.
+let windowing: 'macos' | 'windows' | undefined
 let hovered: { path: string; line: number | undefined; target: string } | undefined
 let window: { path: string; line: number | undefined; isOpen: boolean } | undefined
+let failures = 0
+// How many times the pointer left a path: only the last leave may close the window.
+let leaves = 0
+let assembly: Promise<string | undefined> | undefined
 
 /** The system the session runs on, asked once. */
 function platformOf ($: Engine) {
@@ -65,6 +83,15 @@ function platformOf ($: Engine) {
   })()
   return platform
 }
+
+/** The Windows folder the session names (SystemRoot), else C:\Windows: where its programs are. */
+function windowsRootOf ($: Engine) {
+  windowsRoot ??= (async () => ((await $.env.get('SystemRoot')) || 'C:\\Windows').replace(/[\\/]+$/, ''))()
+  return windowsRoot
+}
+
+/** How PowerShell runs `script`: by its full path, in the Windows folder. */
+const powershellOf = async ($: Engine, script: string) => powershell(script, await windowsRootOf($))
 
 /** Whether the session runs under WSL: Linux, on a Windows desktop, whose file manager shows the path. */
 function wslOf ($: Engine) {
@@ -97,6 +124,22 @@ async function excerptAt ($: Engine, path: string, stat: FsStat, line: number | 
   if (excerpts.size >= PLANS) excerpts.delete(excerpts.keys().next().value!)
   excerpts.set(key, excerpt)
   return excerpt
+}
+
+/**
+ * The lines the window shows of the file at `path`, as QUICK_PEEK_CODE tells them: `WINDOW_LINES`,
+ * or fewer around `line` where their tokens make them longer than `CODE_CHARS`. One line always
+ * fits (it is cut at 240 characters); undefined for a file that is no code nor text.
+ */
+async function codeOf ($: Engine, path: string, stat: FsStat, line: number | undefined) {
+  for (let rows = WINDOW_LINES; rows > 0; rows--) {
+    const code = await excerptAt($, path, stat, line, rows)
+    if (!code) return undefined
+    const { source, ...shown } = code
+    const json = JSON.stringify(shown)
+    if (json.length <= CODE_CHARS) return json
+  }
+  return undefined
 }
 
 /** A run cut where it names a path, each path a run of its own carrying the target it links to. */
@@ -209,7 +252,7 @@ const ago = (ms: number) => {
 
 /** The line the terminal shows over a path where no window can: what it is, and what a click does. */
 function cardOf (target: Target) {
-  const name = target.path.slice(target.path.lastIndexOf('/') + 1) || target.path
+  const name = target.path.slice(Math.max(target.path.lastIndexOf('/'), target.path.lastIndexOf('\\')) + 1) || target.path
   const what = target.stat.kind === 'dir' ? 'folder' : sizeOf(target.stat.size)
   return ` ${name} · ${what} · ${ago(target.stat.mtimeMs)} · click: show in folder `
 }
@@ -316,7 +359,7 @@ function swap (drawn: RenderElement, mine: RenderElement): RenderElement {
 
 /** Shows `path` in the system's file manager, selected; with `isOpening`, opens it instead. */
 async function reveal ($: Engine, path: string, isOpening: boolean) {
-  const run = (argv: string[]) => $.process.run(argv).catch(() => undefined)
+  const run = (argv: string[], env?: Record<string, string>) => $.process.run(argv, env && { env }).catch(() => undefined)
   if (await wslOf($)) {
     const windows = (await run(['wslpath', '-w', path]))?.stdout.trim()
     if (windows) await run(isOpening ? ['explorer.exe', windows] : ['explorer.exe', `/select,${windows}`])
@@ -328,8 +371,14 @@ async function reveal ($: Engine, path: string, isOpening: boolean) {
     return
   }
   if (system === 'windows') {
-    const windows = path.replaceAll('/', '\\')
-    await run(isOpening ? ['explorer', windows] : ['explorer', `/select,${windows}`])
+    // The compiled window asks the shell, in milliseconds; where it is not there or fails,
+    // PowerShell; where PowerShell may not run either (AppLocker), Explorer itself, by its full path.
+    const file = path.replaceAll('/', '\\')
+    const env = { QUICK_PEEK_FILE: file, QUICK_PEEK_ACTION: isOpening ? 'open' : 'reveal' }
+    const exe = await assemblyOf($)
+    if (exe && (await $.fs.exists(exe).catch(() => false)) && (await run([exe], env))?.exitCode === 0) return
+    if ((await run(await powershellOf($, isOpening ? WINDOWS_OPEN : WINDOWS_REVEAL), env))?.exitCode === 0) return
+    await run([`${await windowsRootOf($)}\\explorer.exe`, isOpening ? file : `/select,${file}`])
     return
   }
   if (isOpening) {
@@ -345,25 +394,73 @@ async function reveal ($: Engine, path: string, isOpening: boolean) {
 /**
  * Shows `path` in a window by the pointer till `closeWindow`; a file of code or text, its lines
  * around `line`. The program says `.` ten times a second, so the loop wakes to see it was closed,
- * and leaving the loop ends the program. One that ends without having shown a window, on a path
- * that is there, says the system shows none: from then on the terminal shows the cards.
+ * and leaving the loop ends the program. One that says it cannot show this path (`skip: …`)
+ * changes nothing: the next may show. One that says the system shows no window (`error: …`), one
+ * on macOS that ends without showing one, or on Windows `FAILURES` in a row, give the terminal
+ * the cards from then on.
  */
 async function openWindow ($: Engine, path: string, line: number | undefined) {
   closeWindow()
+  const system = windowing
+  if (!system) return
   const opening = { path, line, isOpen: true }
   window = opening
-  const env: Record<string, string> = { QUICK_PEEK_FILE: path, QUICK_PEEK_SIZE: String(WINDOW_SIZE), QUICK_PEEK_LIFE: String(WINDOW_LIFE), QUICK_PEEK_HINT: 'click: show in Finder · ⌥ click: open' }
-  const stat = await statOf($, path)
-  const code = stat && (await excerptAt($, path, stat, line, WINDOW_LINES))
-  if (!opening.isOpen) return
-  if (code) {
-    const { source, ...shown } = code
-    env.QUICK_PEEK_CODE = JSON.stringify(shown)
+  // Only once the pointer rests on the path: one program, not one for each path it crosses.
+  await $.clock.sleep(OPEN_MS)
+  if (!opening.isOpen || !isOn(path, line)) {
+    if (window === opening) closeWindow()
+    return
   }
+  const env: Record<string, string> = { QUICK_PEEK_FILE: path, QUICK_PEEK_SIZE: String(WINDOW_SIZE), QUICK_PEEK_LIFE: String(WINDOW_LIFE), QUICK_PEEK_HINT: WINDOW_HINT[system] }
+  const stat = await statOf($, path)
+  const code = stat && (await codeOf($, path, stat, line))
+  if (!opening.isOpen) return
+  if (code) env.QUICK_PEEK_CODE = code
+  let argv = ['osascript', '-l', 'JavaScript', '-e', MACOS]
+  let isDirect = false
+  if (system === 'windows') {
+    // The window, compiled once into an exe by PowerShell, starts on its own: in a third of
+    // PowerShell's time and memory. PowerShell runs it for a PDF, whose first page it renders, and
+    // where the exe does not start; it is told the C#, too long for a command line, in the environment.
+    const exe = await assemblyOf($)
+    if (exe) env.QUICK_PEEK_ASSEMBLY = exe
+    isDirect = exe !== undefined && !(!code && /\.pdf$/i.test(path)) && (await $.fs.exists(exe).catch(() => false))
+    argv = exe && isDirect ? [exe] : await powershellOf($, WINDOWS)
+    if (!isDirect) env.QUICK_PEEK_TYPES = WINDOWS_TYPES
+  }
+  // The pointer may have gone to another path while the mod looked for the exe: nothing starts.
+  if (!opening.isOpen) return
+  let { isShown, said } = await show($, opening, argv, env)
+  if (isDirect && !isShown && opening.isOpen && !/^(skip|error):/m.test(said)) {
+    // An exe that did not start (AppLocker may refuse one in a user's folder; an antivirus may hold
+    // one it scans): PowerShell shows this window. Nothing is kept: the next hover tries the exe.
+    $.ui.log(`quick-peek: the window's exe did not start (${reasonOf(said)}); PowerShell runs it`, { to: 'debug' })
+    ;({ isShown, said } = await show($, opening, await powershellOf($, WINDOWS), { ...env, QUICK_PEEK_TYPES: WINDOWS_TYPES }))
+  }
+  if (window === opening) window = undefined
+  if (isShown) failures = 0
+  if (isShown || !opening.isOpen) return
+  if (/^skip:/m.test(said)) {
+    $.ui.log(`quick-peek: no window for ${path} (${reasonOf(said)})`, { to: 'debug' })
+    return
+  }
+  // On Windows a program that failed to start (many PowerShells at once) may start the next time;
+  // on macOS, osascript that failed fails again.
+  if (system === 'windows' && !/^error:/m.test(said) && ++failures < FAILURES) {
+    $.ui.log(`quick-peek: no window (${reasonOf(said)}); the next hover tries again`, { to: 'debug' })
+    return
+  }
+  $.ui.log(`quick-peek: no window (${reasonOf(said)}); the terminal shows the cards`, { to: 'debug' })
+  windowing = undefined
+  plans.clear()
+}
+
+/** Runs the window's program till it ends or `opening` closes: whether it showed a window, and what it said. */
+async function show ($: Engine, opening: { isOpen: boolean }, argv: string[], env: Record<string, string>) {
   let isShown = false
   let said = ''
   try {
-    for await (const { text } of $.process.spawn({ argv: ['osascript', '-l', 'JavaScript', '-e', MACOS], env })) {
+    for await (const { text } of $.process.spawn({ argv, env })) {
       if (said.length < 2000) said += text
       if (/^shown$/m.test(text)) isShown = true
       if (!opening.isOpen) break
@@ -371,11 +468,22 @@ async function openWindow ($: Engine, path: string, line: number | undefined) {
   } catch (error) {
     said += error instanceof Error ? error.message : String(error)
   }
-  if (window === opening) window = undefined
-  if (isShown || !opening.isOpen || /^error: not there/m.test(said)) return
-  $.ui.log(`quick-peek: no window (${said.replace(/\.\n/g, '').trim().slice(0, 300) || 'the program could not start'}); the terminal shows the cards`, { to: 'debug' })
-  windowing = false
-  plans.clear()
+  return { isShown, said }
+}
+
+/** What a program said as it failed, to log: PowerShell may write in UTF-16, its NULs dropped. */
+const reasonOf = (said: string) => said.replaceAll('\u0000', '').replace(/\.\r?\n/g, '').trim().slice(0, 300) || 'the program could not start'
+
+/**
+ * Where the compiled window is kept, named by its source's hash: a folder of the user's own, in
+ * LOCALAPPDATA, where no other user may leave a program of that name. With none, no exe is kept.
+ */
+function assemblyOf ($: Engine) {
+  assembly ??= (async () => {
+    const local = await $.env.get('LOCALAPPDATA')
+    return local ? `${local.replace(/[\\/]+$/, '')}\\quick-peek\\${WINDOWS_BUILD}` : undefined
+  })()
+  return assembly
 }
 
 function closeWindow () {
@@ -384,21 +492,39 @@ function closeWindow () {
 }
 
 /**
+ * Whether the pointer is on `path` naming `line`: asked as a function, as it may move while the
+ * caller waits.
+ */
+function isOn (path: string, line: number | undefined) {
+  return hovered?.path === path && hovered.line === line
+}
+
+/**
  * The pointer came onto a part of `path` naming `line` (`target`, the part's address): its preview
- * opens, unless it is open.
+ * opens, unless it is open: one about to close, as the pointer had left, stays.
  */
 function over ($: Engine, path: string, line: number | undefined, target: string) {
-  const isOpen = hovered?.path === path && hovered.line === line && window?.path === path && window.line === line && window.isOpen
   hovered = { path, line, target }
-  if (isOpen || !windowing) return
+  if (!windowing || (window?.path === path && window.line === line && window.isOpen)) return
   void openWindow($, path, line)
 }
 
-/** The pointer left a part: the preview closes, unless the pointer is already on another part of it. */
-function off (target: string) {
+/**
+ * The pointer left a part: the preview closes a moment later, unless the pointer is back on its
+ * path. A terminal may say the pointer left as it comes on (Windows': a few milliseconds after),
+ * and a window ended and opened again would blink, and come later.
+ */
+async function off ($: Engine, target: string) {
   if (hovered?.target !== target) return
   hovered = undefined
-  closeWindow()
+  const closing = window
+  if (!closing) return
+  const leave = ++leaves
+  await $.clock.sleep(LEAVE_MS)
+  // A later leave decides: the pointer came back and left again, and may come back in its time.
+  if (leave !== leaves || isOn(closing.path, closing.line)) return
+  closing.isOpen = false
+  if (window === closing) window = undefined
 }
 
 export const register: Register = (on, options) => {
@@ -406,7 +532,9 @@ export const register: Register = (on, options) => {
     const result = await next(e)
     const [system, sshConnection, sshTty] = await Promise.all([platformOf($), $.env.get('SSH_CONNECTION'), $.env.get('SSH_TTY')])
     // A window opens on the desktop the session runs on: not over SSH, where that is another machine's.
-    windowing = options.window !== false && e.isInteractive && system === 'macos' && sshConnection === undefined && sshTty === undefined
+    const hasWindow = options.window !== false && e.isInteractive && sshConnection === undefined && sshTty === undefined
+    windowing = hasWindow && (system === 'macos' || system === 'windows') ? system : undefined
+    failures = 0
     plans.clear()
     stats.clear()
     excerpts.clear()
@@ -449,7 +577,7 @@ export const register: Register = (on, options) => {
       return result
     }
     if (data.isOver === true) over($, data.path, typeof data.line === 'number' ? data.line : undefined, target)
-    else off(target)
+    else void off($, target)
     return result
   })
 

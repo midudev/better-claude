@@ -96,9 +96,12 @@ const BY_NAME: Record<string, Language> = {
   license: language('Plain text', PLAIN), codeowners: language('Configuration', CONF), procfile: language('Configuration', CONF)
 }
 
-/** The language of the file at `path`, by its name or extension; none for what is no code nor text (an SVG is a picture). */
+/**
+ * The language of the file at `path`, by its name or extension; none for what is no code nor text
+ * (an SVG is a picture). A Windows path written with `\` (`C:\project\Dockerfile`) reaches here so.
+ */
 export function languageOf (path: string): Language | undefined {
-  const name = path.slice(path.lastIndexOf('/') + 1).toLowerCase()
+  const name = path.slice(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1).toLowerCase()
   if (BY_NAME[name]) return BY_NAME[name]
   if (name.startsWith('.env')) return BY_EXTENSION.env
   if (name.startsWith('dockerfile.') || name.endsWith('.dockerfile')) return BY_NAME.dockerfile
