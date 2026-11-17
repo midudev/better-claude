@@ -5,7 +5,7 @@ import type { Excerpt } from './code'
 import { blocks, inline, items, markerOf, widthOf, wrap } from './markdown'
 import type { Item, Row, Run } from './markdown'
 import { lineOf, pathOfSpan, pathsIn, resolve } from './paths'
-import { MACOS } from './window'
+import { MACOS, WINDOWS, WINDOWS_ARGV } from './window'
 
 type Engine = EngineInterface
 type Ui = Elements['terminal']
@@ -50,9 +50,9 @@ const plans = new Map<string, { plan: Plan | null; at: number }>()
 const excerpts = new Map<string, Excerpt | null>()
 let platform: Promise<Platform> | undefined
 let wsl: Promise<boolean> | undefined
-// Whether a hover opens a window by the pointer (macOS); else each path carries a card the
+// Whether a hover opens a window by the pointer (macOS, Windows); else each path carries a card the
 // terminal reveals over it. The path the pointer is on, and the part it is on; the window open.
-let windowing = false
+let windowing: 'macos' | 'windows' | false = false
 let hovered: { path: string; line: number | undefined; target: string } | undefined
 let window: { path: string; line: number | undefined; isOpen: boolean } | undefined
 
@@ -209,7 +209,7 @@ const ago = (ms: number) => {
 
 /** The line the terminal shows over a path where no window can: what it is, and what a click does. */
 function cardOf (target: Target) {
-  const name = target.path.slice(target.path.lastIndexOf('/') + 1) || target.path
+  const name = target.path.split(/[\\/]/).pop() || target.path
   const what = target.stat.kind === 'dir' ? 'folder' : sizeOf(target.stat.size)
   return ` ${name} · ${what} · ${ago(target.stat.mtimeMs)} · click: show in folder `
 }
@@ -352,7 +352,9 @@ async function openWindow ($: Engine, path: string, line: number | undefined) {
   closeWindow()
   const opening = { path, line, isOpen: true }
   window = opening
-  const env: Record<string, string> = { QUICK_PEEK_FILE: path, QUICK_PEEK_SIZE: String(WINDOW_SIZE), QUICK_PEEK_LIFE: String(WINDOW_LIFE), QUICK_PEEK_HINT: 'click: show in Finder · ⌥ click: open' }
+  const system = windowing
+  const hint = system === 'windows' ? 'click: show in Explorer · Alt+click: open' : 'click: show in Finder · ⌥ click: open'
+  const env: Record<string, string> = { QUICK_PEEK_FILE: path, QUICK_PEEK_SIZE: String(WINDOW_SIZE), QUICK_PEEK_LIFE: String(WINDOW_LIFE), QUICK_PEEK_HINT: hint }
   const stat = await statOf($, path)
   const code = stat && (await excerptAt($, path, stat, line, WINDOW_LINES))
   if (!opening.isOpen) return
@@ -363,7 +365,9 @@ async function openWindow ($: Engine, path: string, line: number | undefined) {
   let isShown = false
   let said = ''
   try {
-    for await (const { text } of $.process.spawn({ argv: ['osascript', '-l', 'JavaScript', '-e', MACOS], env })) {
+    // Windows' script is too long for a command line: PowerShell reads it from the environment.
+    const command = system === 'windows' ? { argv: WINDOWS_ARGV, env: { ...env, QUICK_PEEK_PS: WINDOWS } } : { argv: ['osascript', '-l', 'JavaScript', '-e', MACOS], env }
+    for await (const { text } of $.process.spawn(command)) {
       if (said.length < 2000) said += text
       if (/^shown$/m.test(text)) isShown = true
       if (!opening.isOpen) break
@@ -406,7 +410,7 @@ export const register: Register = (on, options) => {
     const result = await next(e)
     const [system, sshConnection, sshTty] = await Promise.all([platformOf($), $.env.get('SSH_CONNECTION'), $.env.get('SSH_TTY')])
     // A window opens on the desktop the session runs on: not over SSH, where that is another machine's.
-    windowing = options.window !== false && e.isInteractive && system === 'macos' && sshConnection === undefined && sshTty === undefined
+    windowing = options.window !== false && e.isInteractive && (system === 'macos' || system === 'windows') && sshConnection === undefined && sshTty === undefined ? system : false
     plans.clear()
     stats.clear()
     excerpts.clear()

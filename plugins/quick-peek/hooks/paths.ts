@@ -8,6 +8,8 @@ export type Found = { start: number; end: number; target: string }
 // What a sentence puts after a path, and a line (and column) after a file.
 const TRAILING = /[.,;:!?)\]}>'"»”’]+$/
 const LINE = /:\d+(?::\d+)?$/
+// A Windows drive: `C:\` or `C:/`.
+const DRIVE = /^[A-Za-z]:[\\/]/
 // An address: never a path, nor the paths inside it.
 const URL = /\b[a-z][a-z0-9+.-]*:\/\/[^\s<>()]+/gi
 // Absolute, from home or explicitly relative; a relative path with a folder in it; a file name with
@@ -15,14 +17,14 @@ const URL = /\b[a-z][a-z0-9+.-]*:\/\/[^\s<>()]+/gi
 const CANDIDATE = new RegExp(
   [
     String.raw`(?:~|\.{1,2})?\/[^\s\`'"<>()[\]{}|*]+`,
-    String.raw`[A-Za-z]:\\[^\s\`'"<>()[\]{}|*]+`,
+    String.raw`[A-Za-z]:[\\/][^\s\`'"<>()[\]{}|*]+`,
     String.raw`[\w@+-][\w@.+-]*(?:\/[\w@.+-]+)+\/?`,
     String.raw`[\w@+-][\w@.+-]*\.[A-Za-z][A-Za-z0-9]{0,9}`
   ].map(source => `(?<![\\w/.~:\\\\@-])(?:${source})(?::\\d+(?::\\d+)?)?`).join('|'),
   'g'
 )
 // A whole inline code span that is a path: it may hold spaces when it starts as a path does.
-const SPAN = /^(?:(?:~|\.{1,2})?\/|[A-Za-z]:\\)[^\n`]*[^\s`]$/
+const SPAN = /^(?:(?:~|\.{1,2})?\/|[A-Za-z]:[\\/])[^\n`]*[^\s`]$/
 
 /** The path `found` names, with what a sentence or a line number adds after it cut; none when nothing is left. */
 function clean (text: string) {
@@ -62,22 +64,27 @@ export function pathOfSpan (code: string): string | undefined {
 
 /**
  * Where `target` lands: home for `~`, the working folder for a relative path; `.` and `..`
- * folded, no trailing `/`. A Windows path stays as written.
+ * folded, no trailing `/`. A Windows path (`C:\x`, `C:/x`), or one that lands under a Windows
+ * home or working folder, comes out with backslashes, as Windows writes it.
  */
 export function resolve (target: string, cwd: string, home: string | undefined) {
-  if (/^[A-Za-z]:\\/.test(target)) return target
   let path = target
-  if (path === '~' || path.startsWith('~/')) {
-    if (!home) return undefined
-    path = home + path.slice(1)
-  } else if (!path.startsWith('/')) {
-    path = `${cwd}/${path}`
+  if (!DRIVE.test(path)) {
+    if (path === '~' || path.startsWith('~/') || path.startsWith('~\\')) {
+      if (!home) return undefined
+      path = home + path.slice(1)
+    } else if (!path.startsWith('/')) {
+      path = `${cwd}/${path}`
+    }
   }
+  const isWindows = DRIVE.test(path)
   const parts: string[] = []
-  for (const part of path.split('/')) {
+  for (const part of path.split(isWindows ? /[\\/]/ : '/')) {
     if (part === '' || part === '.') continue
-    if (part === '..') parts.pop()
-    else parts.push(part)
+    if (part === '..') {
+      if (!isWindows || parts.length > 1) parts.pop()
+    } else parts.push(part)
   }
+  if (isWindows) return parts.length === 1 ? `${parts[0]}\\` : parts.join('\\')
   return `/${parts.join('/')}`
 }

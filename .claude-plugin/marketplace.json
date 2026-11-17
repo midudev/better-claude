@@ -60,8 +60,8 @@
     {
       "name": "quick-peek",
       "source": "./plugins/quick-peek",
-      "description": "The paths in Claude's replies become links: hover one to preview it by the pointer, click it to show it in Finder (or your system's file manager).",
-      "version": "0.2.0",
+      "description": "The paths in Claude's replies become links: hover one to preview it by the pointer (macOS and Windows), click it to show it in Finder or Explorer (or your system's file manager).",
+      "version": "0.2.1",
       "category": "productivity"
     },
     {
