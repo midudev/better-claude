@@ -81,3 +81,37 @@ export function resolve (target: string, cwd: string, home: string | undefined) 
   }
   return `/${parts.join('/')}`
 }
+
+// A path in quotes, as a drop or a copy from the file manager writes one: it may hold spaces when
+// it starts as a path does. Not a quote closing a word (`it's`).
+const QUOTED = /(?<![\w])(['"])((?:(?:~|\.{1,2})?\/|[A-Za-z]:\\)[^\n'"]*[^\s'"])\1/g
+// A word after a path, past its spaces (a `\ ` an escaped one): where a path with spaces goes on.
+const WORD = /^ +[^\s`'"<>|]+/
+
+/** The paths a text names in quotes (`'/a b/c.webp'`), in order: each the text inside the quotes. */
+export function quotedIn (text: string): Found[] {
+  return [...text.matchAll(QUOTED)].map(match => {
+    const start = match.index + 1
+    return { start, end: start + match[2]!.length, target: match[2]!.replace(LINE, '') }
+  })
+}
+
+/**
+ * What an absolute or home path `found` names in `text` with the next words after it, one more
+ * each, up to `most`: `/a/Application Support/x.png` written with no quotes. Longest first; which
+ * one leads somewhere only a look at the disk tells.
+ */
+export function spacedAfter (text: string, found: Found, most: number): Found[] {
+  if (!/^~?\//.test(found.target)) return []
+  const out: Found[] = []
+  let end = found.end
+  for (let i = 0; i < most; i++) {
+    const word = WORD.exec(text.slice(end))
+    if (!word) break
+    end += word[0].length
+    const written = text.slice(found.start, end).replace(TRAILING, '')
+    const target = clean(written.replace(/\\ /g, ' '))
+    if (target !== undefined) out.unshift({ start: found.start, end: found.start + written.length, target })
+  }
+  return out
+}
