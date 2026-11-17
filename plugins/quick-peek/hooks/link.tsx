@@ -1,11 +1,12 @@
 // The surface module of a path in a reply: it draws its part of the path (a path a row wraps is
 // drawn in parts, one a row), and says when the pointer comes onto it and leaves it, so the hooks
 // module shows that path's preview and hides it; and when it is clicked, so the hooks module
-// shows the path in the file manager (opens it, with alt).
+// shows the path in the file manager (opens it, with alt). Over a sent prompt it draws nothing: an
+// unpainted region over the path the engine draws.
 import type { ClientModule } from 'claude-code'
 
 /** The part drawn, the path it belongs to and the line it names, and the style of the text around it. */
-type Props = { label: string; path: string; line?: number; bold?: boolean; italic?: boolean; strike?: boolean }
+type Props = { label: string; path: string; line?: number; bold?: boolean; italic?: boolean; strike?: boolean; isBare?: boolean }
 
 const REPEAT_MS = 50
 
@@ -37,7 +38,8 @@ const Link: ClientModule<Props, { isOver: boolean; isPressed?: boolean }> = (pro
       })
     }
   })
-  const { Text } = surface.elements
+  const { Box, Text } = surface.elements
+  if (props.isBare) return <Box />
   return (
     <Text color="permission" bold={props.bold} italic={props.italic} strikethrough={props.strike} underline={surface.state?.isOver === true}>
       {props.label}

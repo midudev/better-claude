@@ -5,12 +5,13 @@ import type { On } from 'claude-code'
 
 import { excerptOf, languageOf, tokenize } from './code'
 import { blocks, inline, items, wrap } from './markdown'
-import { lineOf, pathOfSpan, pathsIn, resolve } from './paths'
+import { lineOf, pathOfSpan, pathsIn, quotedIn, resolve, spacedAfter } from './paths'
 
 const VIDEO = '/Users/ana/videos/borrador.mp4'
 const FOLDER = '/Users/ana/videos'
 const README = '/project/app/README.md'
 const SOURCE = '/project/app/src/app.ts'
+const SHOT = '/Users/ana/Library/Application Support/CleanShot/media/CleanShot 2026-11-17 at 09.38.56.webp'
 const CODE = ['import { run } from \'./run\'', '', '// Starts it', 'export async function start (port: number) {', '  const server = await run(port)', '  return server', '}', ''].join('\n')
 const SCREEN = { columns: 60, rows: 40, isFullscreen: true }
 
@@ -21,7 +22,7 @@ const SCREEN = { columns: 60, rows: 40, isFullscreen: true }
 function world (on: On, { system = 'Darwin', env = {}, cwd = '/project/app' }: { system?: string; env?: Record<string, string>; cwd?: string } = {}) {
   const clock = mock.clock(on, { now: 0 })
   mock.env(on, { HOME: '/Users/ana', ...env })
-  const there: Record<string, 'file' | 'dir'> = { [VIDEO]: 'file', [FOLDER]: 'dir', [README]: 'file', [SOURCE]: 'file' }
+  const there: Record<string, 'file' | 'dir'> = { [VIDEO]: 'file', [FOLDER]: 'dir', [README]: 'file', [SOURCE]: 'file', [SHOT]: 'file' }
   const runs: string[][] = []
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: cwd }))
@@ -62,6 +63,14 @@ function world (on: On, { system = 'Darwin', env = {}, cwd = '/project/app' }: {
 const startSession = ($: Engine) => $.session.start({ cwd: '/project/app', surface: 'terminal', isInteractive: true })
 const reply = ($: Engine, text: string, viewport: { columns: number; rows: number; isFullscreen: boolean } = SCREEN) =>
   $.ui.mount({ plugin: 'quick-peek', surface: 'terminal', component: 'AssistantMessage', requestId: 'a-1', props: { text, isFirstOfReply: true }, viewport })
+
+const sent = ($: Engine, text: string, viewport: { columns: number; rows: number; isFullscreen: boolean } = SCREEN) =>
+  $.ui.mount({ plugin: 'quick-peek', surface: 'terminal', component: 'UserMessage', requestId: 'u-1', props: { text, origin: { kind: 'composer' }, isExpanded: false }, viewport })
+/** Where a bare region of a sent prompt sits: its row and column, and the text it lies over. */
+const spotOf = async (ui: { find: (query: { key: string }) => Promise<unknown> }, key: string) => {
+  const client = await ui.find({ key: `path:${key}` }) as { props: { props: { label: string; path: string; isBare?: boolean }; width: number } } | undefined
+  return client && { label: client.props.props.label, path: client.props.props.path, isBare: client.props.props.isBare, width: client.props.width }
+}
 
 // The terminal shows a card over the path, not a window by the pointer.
 const cards = { options: { window: false } }
@@ -250,4 +259,83 @@ test('under WSL a click selects the path in Explorer', async ($, on) => {
   await ui.pointer({ type: 'up', x: 2, y: 0, button: 'left', in: 'path:0:0' })
   await w.clock.settle()
   expect(w.runs).toContainEqual(['explorer.exe', '/select,C:\\Users\\ana\\videos\\borrador.mp4'])
+})
+
+test('a path in quotes is one, spaces and all; one with none takes the words after it that make a path there', () => {
+  const line = `mira '${SHOT}' y "~/a b.txt", it's /x`
+  expect(quotedIn(line).map(({ start, end, target }) => [line.slice(start, end), target])).toEqual([[SHOT, SHOT], ['~/a b.txt', '~/a b.txt']])
+  const bare = `mira ${SHOT} y dime`
+  const [first] = pathsIn(bare)
+  expect(spacedAfter(bare, first!, 8).map(found => found.target)).toEqual([`${SHOT} y dime`, `${SHOT} y`, SHOT, '/Users/ana/Library/Application Support/CleanShot/media/CleanShot 2026-11-17 at', '/Users/ana/Library/Application Support/CleanShot/media/CleanShot 2026-11-17', '/Users/ana/Library/Application Support/CleanShot/media/CleanShot'])
+  expect(spacedAfter('/a/Application\\ Support/x.png', pathsIn('/a/Application\\ Support/x.png')[0]!, 8).map(found => found.target)).toEqual(['/a/Application Support/x.png'])
+  expect(spacedAfter('src/a b', pathsIn('src/a b')[0]!, 8)).toEqual([])
+})
+
+test('a path in quotes with spaces in a sent prompt takes the pointer, a bare region over the engine\'s text', async ($, on) => {
+  const w = world(on)
+  await startSession($)
+  const ui = await sent($, `que ves aqui '${SHOT}'`, { ...SCREEN, columns: 200 })
+  // The engine draws the prompt; the mod only lays its regions over it.
+  expect(await ui.find({ key: 'engine' })).toBeDefined()
+  expect(await spotOf(ui, '0:0')).toEqual({ label: SHOT, path: SHOT, isBare: true, width: SHOT.length })
+  await ui.pointer({ type: 'enter', x: 0, y: 0, in: 'path:0:0' })
+  await w.clock.advance(100)
+  expect(w.windows).toHaveLength(1)
+  expect(w.windows[0]!.env).toMatchObject({ QUICK_PEEK_FILE: SHOT })
+  await ui.resize({ columns: SHOT.length, rows: 1, in: 'path:0:0' })
+  await ui.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'path:0:0' })
+  await ui.pointer({ type: 'up', x: 2, y: 0, button: 'left', in: 'path:0:0' })
+  await w.clock.settle()
+  expect(w.runs).toContainEqual(['open', '-R', SHOT])
+})
+
+test('a path with spaces and no quotes in a sent prompt is found whole; one that is not there is no target', async ($, on) => {
+  world(on)
+  await startSession($)
+  const ui = await sent($, `mira ${SHOT} y dime`, { ...SCREEN, columns: 200 })
+  expect(await spotOf(ui, '0:0')).toMatchObject({ label: SHOT, path: SHOT })
+  expect(await ui.find({ key: 'path:1:0' })).toBeUndefined()
+  await ui.unmount()
+  const missing = await sent($, "nada en '/Users/ana/Library/Application Support/no está.webp' ni en /no/existe.txt")
+  expect(await missing.find({ key: 'engine' })).toBeDefined()
+  expect(await missing.find({ key: 'path:0:0' })).toBeUndefined()
+  await missing.unmount()
+  // Off fullscreen, or not the user's own prompt, the engine's row as it is.
+  expect(await (await sent($, `'${SHOT}'`, { ...SCREEN, isFullscreen: false })).find({ key: 'path:0:0' })).toBeUndefined()
+})
+
+test('a sent prompt\'s path past a wrap lands where the engine wraps it, each row a part of its own', async ($, on) => {
+  world(on)
+  await startSession($)
+  // 40 columns: the text wraps at 37, after `❯ ` and short of the last column.
+  const ui = await sent($, `revisa por favor '${SHOT}'`, { ...SCREEN, columns: 40 })
+  const regions = await Promise.all([0, 1, 2, 3].map(part => ui.find({ key: `path:0:${part}` }))) as unknown as ({ props: { props: { label: string } } } | undefined)[]
+  const labels = regions.flatMap(region => (region ? [region.props.props.label] : []))
+  expect(labels.join(' ')).toBe(SHOT)
+  expect(labels[0]).toBe('/Users/ana/Library/Application')
+  // The first part after its quote, on the row under the words before it; the next at its row's start.
+  const boxes = await Promise.all([0, 1].map(i => ui.find({ key: `spot:${i}` }))) as unknown as { props: { top: number; left: number } }[]
+  expect(boxes.map(box => [box.props.top, box.props.left])).toEqual([[2, 3], [3, 2]])
+  // A line after a blank one, or one Markdown changes, is past what the mod can place.
+  await ui.unmount()
+  const later = await sent($, `hola\n\n'${SHOT}'`)
+  expect(await later.find({ key: 'path:0:0' })).toBeUndefined()
+  await later.unmount()
+  expect(await (await sent($, `**mira** '${SHOT}'`)).find({ key: 'path:0:0' })).toBeUndefined()
+})
+
+test('replies still link their paths with the sent prompts hooked too', async ($, on) => {
+  world(on)
+  await startSession($)
+  const ui = await reply($, `Listo: ${VIDEO}`)
+  expect(await ui.find({ key: 'path:0:0' })).toMatchObject({ props: { props: { label: VIDEO, path: VIDEO } } })
+  expect((await ui.find({ key: 'path:0:0' }) as unknown as { props: { props: { isBare?: boolean } } }).props.props.isBare).toBeUndefined()
+})
+
+test('without a window, a sent prompt\'s path carries the card too', cards, async ($, on) => {
+  world(on)
+  await startSession($)
+  const ui = await sent($, `'${SHOT}'`, { ...SCREEN, columns: 200 })
+  expect(await ui.find({ key: 'card:0:0' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /09\.38\.56\.webp · 12\.0 MB · .* ago · click: show in folder/ })).toBeDefined()
 })

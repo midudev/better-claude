@@ -4,7 +4,8 @@ import { excerptOf, languageOf } from './code'
 import type { Excerpt } from './code'
 import { blocks, inline, items, markerOf, widthOf, wrap } from './markdown'
 import type { Item, Row, Run } from './markdown'
-import { lineOf, pathOfSpan, pathsIn, resolve } from './paths'
+import { lineOf, pathOfSpan, pathsIn, quotedIn, resolve, spacedAfter } from './paths'
+import type { Found } from './paths'
 import { MACOS } from './window'
 
 type Engine = EngineInterface
@@ -26,6 +27,10 @@ type Part =
   | { kind: 'list'; items: DrawnItem[]; gap: number }
 /** How the mod draws a reply: its parts, and the paths its runs link to (`Run.link` indexes them). */
 type Plan = { parts: Part[]; targets: Target[] }
+/** A part of a path in a sent prompt: the row of its text and the column it starts at, its text, its target. */
+type Spot = { row: number; column: number; label: string; link: number }
+/** The paths of a sent prompt that lead somewhere, and where each part of them lands. */
+type Sent = { spots: Spot[]; targets: Target[] }
 
 // The bullet the engine draws before a reply, by system, and the columns it takes.
 const BULLET = { macos: '⏺', other: '●' }
@@ -44,9 +49,21 @@ const CODE_BYTES = 1024 * 1024
 const WINDOW_LINES = 20
 const CARD_LINES = 8
 const CARD_COLUMNS = 100
+// A sent prompt: the engine draws it after `❯ `, on the row under the blank one above it, short of
+// the row's last column; as Markdown up to this many characters. The most words after an unquoted
+// path that may still be part of it (`/a/Application Support/x.png`).
+const PROMPT_LEFT = 2
+const PROMPT_TOP = 1
+const PROMPT_RIGHT = 1
+const PROMPT_MARKDOWN = 4000
+const SPACED_WORDS = 8
+// A line the engine's Markdown would draw otherwise than written: a block's marker, emphasis,
+// code, a link, an escape, HTML. Past one, the mod cannot tell where the prompt's text lands.
+const MARKED = /^\s*(?:#|>|[-+*]\s|\d+[.)]\s|```|~~~|\|)|^ {4}|[`*]|~~|\]\(|<[A-Za-z/!]|\\[!-/:-@[-`{-~]|(?:^|\W)_|_(?:\W|$)/
 
 const stats = new Map<string, { stat: FsStat | null; at: number }>()
 const plans = new Map<string, { plan: Plan | null; at: number }>()
+const sents = new Map<string, { sent: Sent | null; at: number }>()
 const excerpts = new Map<string, Excerpt | null>()
 let platform: Promise<Platform> | undefined
 let wsl: Promise<boolean> | undefined
@@ -198,6 +215,88 @@ async function planOf ($: Engine, text: string): Promise<Plan | null> {
   return plan
 }
 
+/**
+ * Where the paths a sent prompt names that lead somewhere land, its text wrapped `width` columns as
+ * the engine wraps it: each path in quotes whole, spaces and all; one with none, with the words
+ * after it that make a path that is there. Only the lines before the first blank one or the first
+ * the engine's Markdown changes: past those the mod cannot tell where the text lands.
+ */
+async function sentOf ($: Engine, text: string, width: number): Promise<Sent | null> {
+  if (text.length > PROMPT_MARKDOWN || width < 10) return null
+  const cwd = await $.session.cwd()
+  const root = await $.session.root().catch(() => cwd)
+  const key = `${cwd}\n${root}\n${width}\n${text}`
+  const known = sents.get(key)
+  if (known && Date.now() - known.at < PLAN_MS) return known.sent
+
+  const home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'))
+  const pathsOf = (found: Found) => [...new Set([cwd, root].flatMap(base => resolve(found.target, base, home) ?? []))]
+  const lines: { text: string; named: Found[][] }[] = []
+  for (const line of text.split('\n')) {
+    if (line.trim() === '' || MARKED.test(line)) break
+    // Each path a list of what it may name, longest first; one in quotes, the quotes masked.
+    const quoted = quotedIn(line)
+    const masked = quoted.reduce((out, { start, end }) => out.slice(0, start - 1) + ' '.repeat(end - start + 2) + out.slice(end + 1), line)
+    const bare = pathsIn(masked).map(found => [...spacedAfter(masked, found, SPACED_WORDS), found])
+    lines.push({ text: line, named: [...quoted.map(found => [found]), ...bare].sort((a, b) => a[0]!.start - b[0]!.start) })
+  }
+  const paths = [...new Set(lines.flatMap(line => line.named.flat().flatMap(pathsOf)))]
+  const found = new Map((await Promise.all(paths.map(async path => [path, await statOf($, path)] as const))).filter(([, stat]) => stat !== null) as [string, FsStat][])
+
+  const targets: Target[] = []
+  const spots: Spot[] = []
+  let rows = 0
+  for (const line of lines) {
+    const kept: { start: number; end: number; link: number }[] = []
+    for (const options of line.named) {
+      if (options[0]!.start < (kept.at(-1)?.end ?? 0)) continue
+      for (const option of options) {
+        const path = pathsOf(option).find(candidate => found.has(candidate))
+        if (path === undefined) continue
+        const named = line.text.slice(option.start, option.end)
+        const lineNamed = lineOf(named)
+        kept.push({ start: option.start, end: option.end, link: targets.push({ path, stat: found.get(path)!, ...(lineNamed !== undefined && { line: lineNamed }) }) - 1 })
+        break
+      }
+    }
+    const wrapped = wrap(link({ text: line.text, style: {} }, kept), width, false)
+    wrapped.forEach((row, i) => {
+      let column = 0
+      for (const run of row) {
+        if (run.link !== undefined) spots.push({ row: rows + i, column, label: run.text, link: run.link })
+        column += widthOf(run.text)
+      }
+    })
+    rows += wrapped.length
+  }
+  if (!windowing) {
+    await Promise.all(targets.map(async target => {
+      const code = await excerptAt($, target.path, target.stat, target.line, CARD_LINES)
+      if (code) target.code = code
+    }))
+  }
+  const sent = targets.length > 0 ? { spots, targets } : null
+  if (sents.size >= PLANS) sents.delete(sents.keys().next().value!)
+  sents.set(key, { sent, at: Date.now() })
+  return sent
+}
+
+/** The engine's drawing of a sent prompt, with a bare region over each part of a path in it. */
+function drawSent (ui: Ui, drawn: RenderElement, sent: Sent, width: number) {
+  const { Box } = ui
+  const parts = new Map<number, number>()
+  return (
+    <Box flexDirection="column">
+      {drawn}
+      {sent.spots.map((spot, i) => (
+        <Box key={`spot:${i}`} position="absolute" top={PROMPT_TOP + spot.row} left={PROMPT_LEFT + spot.column}>
+          {pathPart(ui, spot.label, {}, spot.link, sent.targets, parts, spot.column, width, true)}
+        </Box>
+      ))}
+    </Box>
+  )
+}
+
 const sizeOf = (bytes: number) =>
   bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${Math.round(bytes / 1024)} KB` : bytes < 1024 ** 3 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${(bytes / 1024 ** 3).toFixed(1)} GB`
 
@@ -215,11 +314,44 @@ function cardOf (target: Target) {
 }
 
 /**
+ * A part of a path, `label`: the `Client` that takes the pointer, at column `at` of a row `width`
+ * wide. `isBare`, an unpainted region over the text the engine draws there.
+ */
+function pathPart (ui: Ui, label: string, style: Run['style'], link: number, targets: Target[], parts: Map<number, number>, at: number, width: number, isBare = false) {
+  const { Box, Client, Code, Text } = ui
+  const { bold, italic, strike } = style
+  const part = parts.get(link) ?? 0
+  parts.set(link, part + 1)
+  const target = targets[link]!
+  const props = { label, path: target.path, ...(target.line !== undefined && { line: target.line }), ...(bold && { bold }), ...(italic && { italic }), ...(strike && { strike }), ...(isBare && { isBare }) }
+  const client = isBare
+    ? <Client key={`path:${link}:${part}`} module="./link.tsx" props={props} width={widthOf(label)} height={1} />
+    : <Client key={`path:${link}:${part}`} module="./link.tsx" props={props} />
+  if (windowing) return client
+  // No window: a card over the path, which the terminal reveals while the pointer is on it,
+  // moved left as far as it needs to end inside the reply. A file of code or text shows its
+  // lines under the card's line, coloured by the engine, on the background of the theme.
+  const card = cardOf(target)
+  const excerpt = target.code
+  const cardWidth = Math.min(excerpt ? Math.max(widthOf(card), CARD_COLUMNS) : widthOf(card), width)
+  const left = Math.max(-at, Math.min(0, width - at - cardWidth))
+  return (
+    <Box key={`card:${link}:${part}`}>
+      {client}
+      <Box position="absolute" top={-1 - (excerpt?.lines.length ?? 0)} left={left} width={cardWidth} flexDirection="column" display="none" hover={{ display: 'flex' }} {...(excerpt && { backgroundColor: 'inverseText' })}>
+        <Text inverse wrap="truncate-end">{card}</Text>
+        {excerpt && <Code source={excerpt.source} path={target.path} startLine={excerpt.first} wrap="truncate-end" />}
+      </Box>
+    </Box>
+  )
+}
+
+/**
  * The rows of a wrapped paragraph, `width` columns: text in its style, each part of a path a
  * `Client` that takes the pointer.
  */
 function drawRows (ui: Ui, rows: Row[], width: number, targets: Target[], parts: Map<number, number>) {
-  const { Box, Client, Code, Link, Text } = ui
+  const { Box, Link, Text } = ui
   return rows.map(row => {
     let column = 0
     return (
@@ -233,28 +365,7 @@ function drawRows (ui: Ui, rows: Row[], width: number, targets: Target[], parts:
             const style = { bold, italic, strikethrough: strike, ...(code && { color: 'permission' }) }
             return href === undefined ? <Text {...style}>{run.text}</Text> : <Text {...style}><Link href={href}>{run.text}</Link></Text>
           }
-          const part = parts.get(run.link) ?? 0
-          parts.set(run.link, part + 1)
-          const target = targets[run.link]!
-          const props = { label: run.text, path: target.path, ...(target.line !== undefined && { line: target.line }), ...(bold && { bold }), ...(italic && { italic }), ...(strike && { strike }) }
-          const client = <Client key={`path:${run.link}:${part}`} module="./link.tsx" props={props} />
-          if (windowing) return client
-          // No window: a card over the path, which the terminal reveals while the pointer is on it,
-          // moved left as far as it needs to end inside the reply. A file of code or text shows its
-          // lines under the card's line, coloured by the engine, on the background of the theme.
-          const card = cardOf(target)
-          const excerpt = target.code
-          const cardWidth = Math.min(excerpt ? Math.max(widthOf(card), CARD_COLUMNS) : widthOf(card), width)
-          const left = Math.max(-at, Math.min(0, width - at - cardWidth))
-          return (
-            <Box key={`card:${run.link}:${part}`}>
-              {client}
-              <Box position="absolute" top={-1 - (excerpt?.lines.length ?? 0)} left={left} width={cardWidth} flexDirection="column" display="none" hover={{ display: 'flex' }} {...(excerpt && { backgroundColor: 'inverseText' })}>
-                <Text inverse wrap="truncate-end">{card}</Text>
-                {excerpt && <Code source={excerpt.source} path={target.path} startLine={excerpt.first} wrap="truncate-end" />}
-              </Box>
-            </Box>
-          )
+          return pathPart(ui, run.text, run.style, run.link, targets, parts, at, width)
         })}
       </Box>
     )
@@ -376,6 +487,7 @@ async function openWindow ($: Engine, path: string, line: number | undefined) {
   $.ui.log(`quick-peek: no window (${said.replace(/\.\n/g, '').trim().slice(0, 300) || 'the program could not start'}); the terminal shows the cards`, { to: 'debug' })
   windowing = false
   plans.clear()
+  sents.clear()
 }
 
 function closeWindow () {
@@ -408,6 +520,7 @@ export const register: Register = (on, options) => {
     // A window opens on the desktop the session runs on: not over SSH, where that is another machine's.
     windowing = options.window !== false && e.isInteractive && system === 'macos' && sshConnection === undefined && sshTty === undefined
     plans.clear()
+    sents.clear()
     stats.clear()
     excerpts.clear()
     return result
@@ -463,5 +576,16 @@ export const register: Register = (on, options) => {
     const drawn = await next(e)
     const bullet = (await platformOf($)) === 'macos' ? BULLET.macos : BULLET.other
     return swap(drawn, draw($.ui.resolve(e), e, plan, bullet))
+  })
+
+  // A prompt the user sent that names a path that leads somewhere: the engine draws it, and the
+  // mod lays a bare region over each part of each path, which takes the pointer and the click.
+  on('ui.render', { component: 'UserMessage' }, async ($, e, next) => {
+    if (e.surface !== 'terminal' || e.viewport?.isFullscreen !== true || e.props.origin.kind !== 'composer') return next(e)
+    const width = e.viewport.columns - PROMPT_LEFT - PROMPT_RIGHT
+    const sent = await sentOf($, e.props.text, width).catch(() => null)
+    if (!sent) return next(e)
+    const drawn = await next(e)
+    return drawSent($.ui.resolve(e), drawn, sent, width)
   })
 }

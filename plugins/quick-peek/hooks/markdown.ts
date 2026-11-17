@@ -310,9 +310,10 @@ function cut (text: string, room: number, isPath: boolean) {
 /**
  * The runs wrapped into rows of `width` columns, as the engine wraps a reply: at spaces, a word
  * that does not fit moved to the next row, one longer than a row cut where it saves a row. The
- * spaces a wrap lands on are dropped.
+ * spaces a wrap lands on are dropped. `isCutAtFolder` false, a path is cut where a row ends, as the
+ * engine cuts the text it wraps itself.
  */
-export function wrap (runs: Run[], width: number): Row[] {
+export function wrap (runs: Run[], width: number, isCutAtFolder = true): Row[] {
   type Piece = Run & { width: number }
   type Token = { kind: 'word' | 'space' | 'break'; pieces: Piece[]; width: number }
   const tokens: Token[] = []
@@ -380,7 +381,7 @@ export function wrap (runs: Run[], width: number): Row[] {
       let left = piece.text
       while (left !== '') {
         if (column >= width) newRow()
-        const end = cut(left, width - column, piece.link !== undefined)
+        const end = cut(left, width - column, isCutAtFolder && piece.link !== undefined)
         const part = left.slice(0, end)
         put({ ...piece, text: part, width: widthOf(part) })
         left = left.slice(end)
