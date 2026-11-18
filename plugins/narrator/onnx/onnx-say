@@ -1,0 +1,78 @@
+#!/bin/sh
+# A Speak command for the narrator: says the narration with an ONNX speech model, on this machine,
+# through sherpa-onnx (Piper and other VITS models, Kokoro, Kitten, Matcha...).
+#
+#   onnx-say [lang=]folder[#speaker]... narration
+#
+# Each folder holds one model, as sherpa-onnx ships it. One with a language (fr=~/models/piper-fr)
+# says that language's narrations, and the one with none says the others. #speaker picks one voice
+# of a model with several (#30). The narrator adds the narration last and gives NARRATOR_LANG and
+# NARRATOR_SPEED. With no folder for the narration's language, or when the model fails, it exits 1
+# and the narrator's own voice says it.
+set -u
+
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+python=${NARRATOR_ONNX_PYTHON:-$here/venv/bin/python}
+
+if [ $# -lt 2 ]; then
+  echo 'usage: onnx-say [lang=]folder[#speaker]... narration' >&2
+  exit 2
+fi
+
+for text; do :; done
+lang=$(printf '%s' "${NARRATOR_LANG:-}" | tr '[:upper:]' '[:lower:]')
+lang=${lang%%[-_]*}
+
+own=''
+any=''
+i=1
+for arg; do
+  [ "$i" -lt $# ] || break
+  i=$((i + 1))
+  case $arg in
+    [a-z][a-z]=* | [a-z][a-z][a-z]=*)
+      if [ -z "$own" ] && [ "${arg%%=*}" = "$lang" ]; then own=${arg#*=}; fi ;;
+    *)
+      if [ -z "$any" ]; then any=$arg; fi ;;
+  esac
+done
+
+model=${own:-$any}
+if [ -z "$model" ]; then
+  echo "onnx-say: no model for ${lang:-this language}" >&2
+  exit 1
+fi
+
+speaker=''
+case $model in
+  *'#'*) speaker=${model##*#}; model=${model%#*} ;;
+esac
+# The shell leaves ~ alone after fr=, so it is opened here.
+# shellcheck disable=SC2088
+case $model in
+  '~/'*) model=$HOME/${model#'~/'} ;;
+esac
+
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/narrator-onnx.XXXXXX") || exit 1
+# No exec on the player: the narrator stops us with `pkill -P`, which ends the player, and then
+# this cleanup runs.
+trap 'rm -rf "$tmp"' EXIT
+trap 'exit 1' HUP INT TERM
+wav=$tmp/narration.wav
+
+set -- "$python" -I "$here/speak.py" "$model" "$wav" "$text" --lang "$lang" --speed "${NARRATOR_SPEED:-1}"
+if [ -n "$speaker" ]; then set -- "$@" --speaker "$speaker"; fi
+"$@" || exit 1
+
+for player in afplay pw-play paplay aplay; do
+  if command -v "$player" >/dev/null 2>&1; then
+    "$player" "$wav"
+    exit
+  fi
+done
+if command -v ffplay >/dev/null 2>&1; then
+  ffplay -nodisp -autoexit -loglevel quiet "$wav"
+  exit
+fi
+echo 'onnx-say: no audio player (afplay, pw-play, paplay, aplay or ffplay)' >&2
+exit 1
