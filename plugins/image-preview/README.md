@@ -17,7 +17,7 @@ Hovering needs the mouse, so it needs Claude Code's fullscreen interface (`"tui"
 
 ## In a window, by the pointer
 
-Where the terminal cannot draw a picture itself (Warp, iTerm2, Terminal.app, VS Code), the preview is a small borderless window outside the terminal: above the pointer and to its right, under it or to its left where the screen has no room, never over the pointer. It never takes the focus or the pointer, so you keep typing and hovering in the terminal, and it stands over every window, full-screen ones too. It shows in about a third of a second.
+Where the terminal cannot draw a picture itself (Warp, iTerm2, Terminal.app, VS Code, Herdr), the preview is a small borderless window outside the terminal: above the pointer and to its right, under it or to its left where the screen has no room, never over the pointer. It never takes the focus or the pointer, so you keep typing and hovering in the terminal, and it stands over every window, full-screen ones too. It shows in about a third of a second. On macOS, Mission Control hides it, and another app coming to the front ends it.
 
 The picture shows as it is, sharp: a screenshot of text reads as it was. It is shrunk only to fit 800 points on its longest side and 70% of the screen, and never enlarged. Each system draws the window with what it has:
 
@@ -48,6 +48,8 @@ The card floats over the transcript and moves nothing: the transcript does not s
 
 Warp speaks the kitty graphics protocol, but not the Unicode placeholders Claude Code draws pictures with, so Warp cannot draw it in the terminal. `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` makes this mod send the picture to a terminal Claude Code does not know draws pictures; it only helps in one that supports those placeholders. It sends a PNG of up to 1024 pixels and 2 MB; a larger one is drawn in cells.
 
+Herdr says it is Ghostty (`TERM_PROGRAM=ghostty`, and its XTVERSION reply), but it does not read a picture from a file, so Claude Code would draw only the `[Image #N]` label. A session in a Herdr terminal (`HC_TERMINAL_ID` is set) is not taken for Ghostty: it is treated like any other terminal that cannot draw the picture, so it gets the window where one can open.
+
 ## Install
 
 ```text
@@ -59,7 +61,7 @@ Warp speaks the kitty graphics protocol, but not the Unicode placeholders Claude
 
 - The text inside the prompt box can only be colored by a mod, not hovered, so while you write the pointer target is the row above it, not the `[Image #N]` in the box itself.
 - In a sent prompt, the `[Image #N]` takes the pointer and the click in the prompt's first line only, before it would wrap: past that, the mod cannot tell where the line puts it. The `⎿ [Image #N]` rows show the preview but take no click, which Claude Code keeps for itself.
-- A window stays two minutes at most, even with the pointer still on its `[Image #N]`: move off and back on to open it again.
+- A window stays two minutes at most, even with the pointer still on its `[Image #N]`: move off and back on to open it again. The same goes for one that ended because another app came to the front (macOS).
 - A click opens the image with `open -a Preview` on macOS, `explorer` on Windows, `explorer.exe` under WSL (the path turned into its Windows form by `wslpath -w`), `xdg-open` elsewhere.
 - On Linux the window needs X11 (or XWayland): under Wayland alone there is none, and the terminal draws the card. Under XWayland the window may not stand by the pointer when the terminal is a Wayland window.
 - On Windows the first window compiles a small helper into the temp folder, which takes a second. The Windows window and converter have been written and checked (the scripts parse, the commands are tested) and have been run on Windows from WSL.

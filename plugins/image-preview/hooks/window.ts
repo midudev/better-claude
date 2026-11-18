@@ -52,7 +52,8 @@ function run () {
   panel.hasShadow = true
   panel.opaque = false
   panel.backgroundColor = $.NSColor.clearColor
-  panel.collectionBehavior = 1 | 16 | 256
+  // All spaces, full-screen ones too; transient, so Mission Control hides it (stationary would not).
+  panel.collectionBehavior = 1 | 8 | 256
   const backdrop = $.NSVisualEffectView.alloc.initWithFrame($.NSMakeRect(0, 0, outer.width, outer.height))
   backdrop.material = 13
   backdrop.state = 1
@@ -66,9 +67,18 @@ function run () {
   panel.contentView = backdrop
   panel.orderFrontRegardless
   say('shown')
+  // Another app coming to the front (Cmd-Tab, a swipe to its space) moves no pointer over the
+  // terminal, so nobody would say the pointer left: the window ends itself.
+  const frontmost = () => {
+    const app = $.NSWorkspace.sharedWorkspace.frontmostApplication
+    return app.isNil() ? undefined : app.processIdentifier
+  }
+  const owner = frontmost()
   const end = Date.now() + (Number(read('IMAGE_PREVIEW_LIFE')) || 120) * 1000
   while (Date.now() < end) {
     $.NSRunLoop.currentRunLoop.runUntilDate($.NSDate.dateWithTimeIntervalSinceNow(0.1))
+    const now = frontmost()
+    if (owner !== undefined && now !== undefined && now !== owner) return
     say('.')
   }
 }
