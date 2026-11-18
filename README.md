@@ -13,6 +13,7 @@ Plugins and mods for Claude Code by midudev, one per folder in [`plugins/`](plug
 | **Commit** | `/commit` asks commit + push, commit only or a new branch, then splits your changes into Conventional Commits, on Haiku 5.5. | [`plugins/commit/`](plugins/commit/README.md) |
 | **Narrator** | Click `⏸︎ narrator off` in the footer, or `/narrator`, and Claude tells you out loud what it did after each turn, in your language, with the best free voice your system has. | [`plugins/narrator/`](plugins/narrator/README.md) |
 | **Time Machine** | Every turn that changes files is a git snapshot: `/timeline` puts the files back as before any turn, Bash changes included. | [`plugins/time-machine/`](plugins/time-machine/README.md) |
+| **Worktree Diff** | The worktree's changed files in a row above the prompt: click one and a pane opens with its code, its diff and a Cursor-style editor. | [`plugins/worktree-diff/`](plugins/worktree-diff/README.md) |
 
 <!-- Hidden until they are on the web:
 | **After** | A prompt queue: `/after <task>` runs it when Claude finishes, without steering it. | [`plugins/after/`](plugins/after/README.md) |
@@ -32,6 +33,7 @@ Plugins and mods for Claude Code by midudev, one per folder in [`plugins/`](plug
 /plugin install commit@better-claude
 /plugin install narrator@better-claude
 /plugin install time-machine@better-claude
+/plugin install worktree-diff@better-claude
 ```
 
 <!-- Hidden until they are on the web:

@@ -1,0 +1,28 @@
+{
+  "name": "worktree-diff",
+  "version": "0.3.0",
+  "description": "The worktree's changed files above the prompt; pick one and a Cursor-style editor opens in a pane with its code, its diff and its variables (.env).",
+  "author": {
+    "name": "Neftali Hernandez (NNeshz)",
+    "url": "https://github.com/NNeshz"
+  },
+  "homepage": "https://github.com/midudev/better-claude",
+  "repository": "https://github.com/midudev/better-claude",
+  "license": "MIT",
+  "keywords": ["git", "worktree", "diff", "editor", "pane", "mod"],
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "editor": {
+      "type": "string",
+      "title": "External editor",
+      "description": "The command that opens a file (the path is appended). E.g. open, open -a Warp, code -g, zed, cursor",
+      "default": "open"
+    },
+    "background": {
+      "type": "string",
+      "title": "Pane background",
+      "description": "The pane's background color (hex or name). Empty uses the terminal's",
+      "default": "#0a0a0a"
+    }
+  }
+}
