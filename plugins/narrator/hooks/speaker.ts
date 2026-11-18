@@ -419,3 +419,88 @@ wait "$pid"
 pid=
 leave
 `
+
+/**
+ * A speech server's speaker, run by LINUX on macOS and Linux: it posts NARRATOR_BODY, an OpenAI
+ * speech request, to NARRATOR_SERVER's `/audio/speech` (OpenAI's, or any server that speaks that
+ * API, as Kokoro-FastAPI), then plays the WAV that comes back with the system's player. NARRATOR_SERVER_KEY,
+ * when set, goes to curl as its Authorization header on its standard input, never on a command line
+ * others can read. Ended, it ends curl or the player, and leaves no file behind; a server that does
+ * not answer with audio, or no player to play it, is an `error` line and an exit code other than 0,
+ * so the next speaker says the narration.
+ */
+export const SERVER = String.raw`
+tmp=$TMPDIR
+[ -n "$tmp" ] || tmp=/tmp
+dir=$(mktemp -d "$tmp/claude-narrator-XXXXXX") || { echo 'error: no folder for the speech'; exit 1; }
+child=
+end () {
+  if [ -n "$child" ]; then kill "$child" 2>/dev/null; fi
+  rm -rf "$dir"
+  exit 1
+}
+trap 'rm -rf "$dir"' EXIT
+trap end TERM INT HUP PIPE
+# The narration goes in a file, by a builtin: on no command line others can read.
+printf '%s' "$NARRATOR_BODY" > "$dir/body.json"
+{ if [ -n "$NARRATOR_SERVER_KEY" ]; then printf 'Authorization: Bearer %s\n' "$NARRATOR_SERVER_KEY"; fi; } |
+  curl -sS -H @- -H 'Content-Type: application/json' --connect-timeout 5 --max-time 60 --data-binary @"$dir/body.json" \
+    -o "$dir/speech.wav" -w '%{http_code}' "$NARRATOR_SERVER/audio/speech" > "$dir/status" 2> "$dir/error" &
+child=$!
+wait "$child"
+fetched=$?
+child=
+status=$(cat "$dir/status" 2>/dev/null)
+case $status in
+  2??) if [ "$fetched" -ne 0 ]; then echo "error: the speech did not arrive whole: $(head -c 200 "$dir/error" | tr '\n' ' ')"; exit 1; fi ;;
+  000 | '') echo "error: the speech server did not answer: $(head -c 200 "$dir/error" | tr '\n' ' ')"; exit 1 ;;
+  *) echo "error: the speech server answered $status: $(head -c 200 "$dir/speech.wav" | tr '\n' ' ')"; exit 1 ;;
+esac
+if command -v afplay >/dev/null 2>&1; then set -- afplay
+elif command -v pw-play >/dev/null 2>&1; then set -- pw-play
+elif command -v paplay >/dev/null 2>&1; then set -- paplay
+elif command -v aplay >/dev/null 2>&1; then set -- aplay -q
+elif command -v ffplay >/dev/null 2>&1; then set -- ffplay -nodisp -autoexit -loglevel quiet
+else echo 'error: no audio player to play the speech (afplay, pw-play, paplay, aplay or ffplay)'; exit 1
+fi
+"$@" "$dir/speech.wav" &
+child=$!
+wait "$child" || { echo "error: $1 could not play the speech"; exit 1; }
+`
+
+/**
+ * The voices a speech server lists at NARRATOR_SERVER's `/audio/voices`, as JSON, where it has that
+ * route (Kokoro-FastAPI does; OpenAI's API does not). The key goes as SERVER's does.
+ */
+export const SERVER_VOICES = String.raw`
+{ if [ -n "$NARRATOR_SERVER_KEY" ]; then printf 'Authorization: Bearer %s\n' "$NARRATOR_SERVER_KEY"; fi; } |
+  curl -sSf -H @- --connect-timeout 3 --max-time 10 "$NARRATOR_SERVER/audio/voices"
+`
+
+/** The voice names in a server's `/audio/voices` answer: `{ voices: [...] }`, each a name or `{ id, name }`. */
+export function serverVoicesIn (answer: string) {
+  try {
+    const { voices } = JSON.parse(answer) as { voices?: unknown }
+    if (!Array.isArray(voices)) return []
+    return voices.map(voice => (typeof voice === 'string' ? voice : String((voice as { id?: unknown; name?: unknown })?.id ?? (voice as { name?: unknown })?.name ?? ''))).filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
+/** What a speech server is asked for when its voice setting names none. */
+export const SERVER_VOICE = 'alloy'
+
+/**
+ * The speech server's voice for a language, from its setting: one voice (`nova`), or one per
+ * language, as `es:ef_dora`, beside one without a language for the others (`nova, es:ef_dora`).
+ * The language's own, else the one without a language, else English's, else the first.
+ */
+export function serverVoiceFor (setting: string, language: string) {
+  const entries = setting.split(',').map(entry => entry.trim()).filter(Boolean).map(entry => {
+    const at = entry.indexOf(':')
+    return at < 0 ? { language: '', voice: entry } : { language: entry.slice(0, at).trim().toLowerCase(), voice: entry.slice(at + 1).trim() }
+  }).filter(entry => entry.voice)
+  const of = (code: string) => entries.find(entry => entry.language === code)?.voice
+  return of(language) ?? of('') ?? of('en') ?? entries[0]?.voice ?? SERVER_VOICE
+}

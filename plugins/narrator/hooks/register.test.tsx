@@ -3,7 +3,8 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { languageOf } from './register'
+import { languageOf, serverRefusal } from './register'
+import { serverVoiceFor, serverVoicesIn } from './speaker'
 import { finalQuestion, guessLanguage, parseNarration, plain, withQuestion } from './text'
 
 const USAGE = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
@@ -19,6 +20,10 @@ type World = {
   processErrors?: string[]
   unknownVoices?: string[]
   speaker?: 'speaks' | 'talks on' | 'fails'
+  /** Whether the speech server's speaker fails, so the next one speaks. */
+  isServerDown?: boolean
+  /** What the speech server answers at /audio/voices (empty: it does not). */
+  serverVoices?: string
   /** How many narrations of other windows the speaker says wait their turn behind it. */
   waiting?: number
   hasEngineVoice?: boolean
@@ -30,7 +35,7 @@ type World = {
  * Everything beneath the mod: the session, the store, the system and its synthesizers, the model
  * that writes the narration, and the engine's own `$.audio.speak`.
  */
-function world (on: On, { system = 'Darwin', env = {}, reply = 'es\nHe añadido el narrador y los tests pasan.', tools = '', voices = '', table = '', processErrors = [], unknownVoices = [], speaker = 'speaks', waiting = 0, hasEngineVoice = true, recap = 'Estamos en `plugins/narrator/hooks/register.tsx` y los tests pasan.', store = {} }: World = {}) {
+function world (on: On, { system = 'Darwin', env = {}, reply = 'es\nHe añadido el narrador y los tests pasan.', tools = '', voices = '', table = '', processErrors = [], unknownVoices = [], speaker = 'speaks', isServerDown = false, serverVoices = '', waiting = 0, hasEngineVoice = true, recap = 'Estamos en `plugins/narrator/hooks/register.tsx` y los tests pasan.', store = {} }: World = {}) {
   const clock = mock.clock(on, { now: 0 })
   const kept: Record<string, unknown> = { ...store }
   on('store.get', ($, e) => ({ value: kept[e.key] }))
@@ -91,10 +96,14 @@ function world (on: On, { system = 'Darwin', env = {}, reply = 'es\nHe añadido 
   })
   // A speaker: it says which voice it speaks with, then `.` every tenth of a second while it talks.
   on('process.spawn', async function * ($, e) {
+    if (e.argv.includes('narrator-voices')) {
+      if (serverVoices) yield { stream: 'stdout' as const, text: serverVoices }
+      return { value: { code: serverVoices ? 0 : 22, signal: null } }
+    }
     const run: Spoken = { argv: [...e.argv], env: { ...e.env }, isEnded: false }
     spoken.push(run)
     try {
-      if (speaker === 'fails') {
+      if (speaker === 'fails' || (isServerDown && e.env?.NARRATOR_SERVER !== undefined)) {
         yield { stream: 'stdout' as const, text: 'error: no voice\n' }
         return { value: { code: 1, signal: null } }
       }
@@ -530,6 +539,156 @@ test('on Windows a speak command is left aside: the system voice speaks', { opti
   await speech
   expect(w.spoken[0]!.argv[0]).toBe('powershell')
   expect(w.spoken[0]!.env.NARRATOR_SPEAKER).toBeUndefined()
+})
+
+const SERVER_OPTIONS = { server: 'https://speech.example/v1/' }
+
+test('a speech server says the narration, in the line, before the system voice', { options: SERVER_OPTIONS }, async ($, on) => {
+  const w = world(on, { store: { enabled: true } })
+  await startSession($)
+  const speech = w.nextSpeech()
+  await turn($)
+  await speech
+  expect(w.spoken).toHaveLength(1)
+  expect(w.spoken[0]!.argv.slice(0, 4)).toEqual(['sh', '-c', expect.stringContaining('NARRATOR_TICKET'), 'narrator-line'])
+  const [shell, flag, wrapper, name, ...rest] = behindLine(w.spoken[0]!)
+  expect([shell, flag, name]).toEqual(['sh', '-c', 'narrator'])
+  expect(wrapper).toContain('NARRATOR_SPEAKER')
+  expect(rest).toEqual(['sh', '-c', expect.stringContaining('/audio/speech'), 'narrator-server'])
+  const { env } = w.spoken[0]!
+  expect(env).toMatchObject({ NARRATOR_SERVER: 'https://speech.example/v1', NARRATOR_SPEAKER: 'alloy (speech server)', NARRATOR_TEXT: 'He añadido el narrador y los tests pasan.' })
+  expect(JSON.parse(env.NARRATOR_BODY!)).toEqual({ model: 'tts-1', input: 'He añadido el narrador y los tests pasan.', voice: 'alloy', response_format: 'wav', speed: 1.3 })
+  expect(env.NARRATOR_SERVER_KEY).toBe('')
+})
+
+test('the speech server voice can be one per language, and the model and key reach it', { options: { ...SERVER_OPTIONS, serverVoice: 'nova, es:ef_dora', serverModel: 'my-model', serverKey: 'sk-secret' } }, async ($, on) => {
+  const w = world(on, { store: { enabled: true } })
+  await startSession($)
+  const speech = w.nextSpeech()
+  await turn($)
+  await speech
+  const { env, argv } = w.spoken[0]!
+  expect(JSON.parse(env.NARRATOR_BODY!)).toMatchObject({ model: 'my-model', voice: 'ef_dora' })
+  expect(env.NARRATOR_SPEAKER).toBe('ef_dora (speech server)')
+  // The key travels in the environment, never in a command line other users can read.
+  expect(env.NARRATOR_SERVER_KEY).toBe('sk-secret')
+  expect(argv.join(' ')).not.toContain('sk-secret')
+})
+
+test('any server and model: a whole endpoint is taken as its address', { options: { server: 'http://127.0.0.1:9000/v1/audio/speech', serverModel: 'gpt-4o-mini-tts' } }, async ($, on) => {
+  const w = world(on, { store: { enabled: true } })
+  await startSession($)
+  const speech = w.nextSpeech()
+  await turn($)
+  await speech
+  expect(w.spoken[0]!.env.NARRATOR_SERVER).toBe('http://127.0.0.1:9000/v1')
+  expect(JSON.parse(w.spoken[0]!.env.NARRATOR_BODY!)).toMatchObject({ model: 'gpt-4o-mini-tts', voice: 'alloy' })
+})
+
+test('when the speech server fails, the system voice says the narration', { options: SERVER_OPTIONS }, async ($, on) => {
+  const w = world(on, { store: { enabled: true }, isServerDown: true })
+  await startSession($)
+  const speech = w.nextSpeech()
+  await turn($)
+  await speech
+  await w.settled()
+  expect(w.spoken).toHaveLength(2)
+  expect(w.spoken[1]!.env.NARRATOR_SERVER).toBeUndefined()
+  expect(behindLine(w.spoken[1]!).slice(0, 3)).toEqual(['osascript', '-l', 'JavaScript'])
+  expect(w.said).toEqual([])
+})
+
+test('a speech server works on Linux too, with its synthesizer after it', { options: SERVER_OPTIONS }, async ($, on) => {
+  const w = world(on, { store: { enabled: true }, system: 'Linux', tools: '/usr/bin/espeak-ng\n', isServerDown: true })
+  await startSession($)
+  const speech = w.nextSpeech()
+  await turn($)
+  await speech
+  await w.settled()
+  expect(w.spoken.map(run => run.env.NARRATOR_SERVER ?? behindLine(run)[4])).toEqual(['https://speech.example/v1', 'espeak-ng'])
+})
+
+test('on Windows the speech server is left aside: the system voice speaks', { options: SERVER_OPTIONS }, async ($, on) => {
+  const w = world(on, { system: 'Windows_NT', env: { OS: 'Windows_NT' }, store: { enabled: true } })
+  await startSession($)
+  const speech = w.nextSpeech()
+  await turn($)
+  await speech
+  expect(w.spoken[0]!.argv[0]).toBe('powershell')
+  expect(w.spoken[0]!.env.NARRATOR_SERVER).toBeUndefined()
+})
+
+test('a speak command of your own comes before the speech server', { options: { ...SERVER_OPTIONS, command: 'my-voice' } }, async ($, on) => {
+  const w = world(on, { store: { enabled: true } })
+  await startSession($)
+  const speech = w.nextSpeech()
+  await turn($)
+  await speech
+  expect(w.spoken).toHaveLength(1)
+  expect(w.spoken[0]!.env.NARRATOR_SPEAKER).toBe('my-voice')
+  expect(w.spoken[0]!.env.NARRATOR_SERVER).toBeUndefined()
+})
+
+test('/narrator test sends a named voice to the speech server', { options: { ...SERVER_OPTIONS, serverVoice: 'nova' } }, async ($, on) => {
+  const w = world(on)
+  await startSession($)
+  expect((await narrator($, 'test shimmer')).text).toBe('Narrator: previewed shimmer.')
+  expect(JSON.parse(w.spoken[0]!.env.NARRATOR_BODY!)).toMatchObject({ voice: 'shimmer', input: 'Hello! This is a voice preview for Narrator.' })
+  expect((await narrator($, 'test')).text).toBe('Narrator: previewed Luisa.')
+  expect(JSON.parse(w.spoken[1]!.env.NARRATOR_BODY!)).toMatchObject({ voice: 'nova' })
+})
+
+test('/narrator voices lists the speech server\'s voices before the system\'s', { options: SERVER_OPTIONS }, async ($, on) => {
+  world(on, { voices: 'Thomas\tfr-FR\n', serverVoices: '{"voices":[{"id":"ff_siwis","name":"ff_siwis"},{"id":"af_heart","name":"af_heart"}]}' })
+  await startSession($)
+  expect((await narrator($, 'voices')).text).toBe('Speech server voices (https://speech.example/v1; set them in Speech server voice, try one with /narrator test <voice>):\nff_siwis, af_heart\n\nInstalled voices:\nfr-FR: Thomas')
+})
+
+test('/narrator voices says so when the speech server does not list its voices', { options: SERVER_OPTIONS }, async ($, on) => {
+  world(on, { voices: 'Thomas\tfr-FR\n' })
+  await startSession($)
+  expect((await narrator($, 'voices')).text).toBe('Speech server (https://speech.example/v1): it lists no voices at /audio/voices; its documentation names them.\n\nInstalled voices:\nfr-FR: Thomas')
+})
+
+test('a server\'s voice list: names, or objects with an id or a name', () => {
+  expect(serverVoicesIn('{"voices":["nova",{"id":"ff_siwis"},{"name":"bf_emma"},{}]}')).toEqual(['nova', 'ff_siwis', 'bf_emma'])
+  expect(serverVoicesIn('not json')).toEqual([])
+  expect(serverVoicesIn('{"data":[]}')).toEqual([])
+})
+
+test('a key is never sent over plain http to another machine: the system voice speaks, and the session is told', { options: { server: 'http://speech.example/v1', serverKey: 'sk-secret' } }, async ($, on) => {
+  const w = world(on, { store: { enabled: true } })
+  await startSession($)
+  const speech = w.nextSpeech()
+  await turn($)
+  await speech
+  expect(w.spoken).toHaveLength(1)
+  expect(w.spoken[0]!.env.NARRATOR_SERVER).toBeUndefined()
+  expect(w.toasts).toEqual([expect.stringContaining('not sent over plain http to speech.example')])
+})
+
+test('a key goes over https, or over http to this machine', () => {
+  expect(serverRefusal('http://speech.example/v1', 'k')).not.toBe('')
+  expect(serverRefusal('http://192.168.1.20:8880/v1', 'k')).not.toBe('')
+  expect(serverRefusal('https://api.openai.com/v1', 'k')).toBe('')
+  expect(serverRefusal('http://localhost:8880/v1', 'k')).toBe('')
+  expect(serverRefusal('http://127.0.0.1:8880/v1', 'k')).toBe('')
+  expect(serverRefusal('http://[::1]:8880/v1', 'k')).toBe('')
+  expect(serverRefusal('http://speech.example/v1', '')).toBe('')
+  // Names that only look like this machine's.
+  expect(serverRefusal('http://127.evil.example/v1', 'k')).not.toBe('')
+  expect(serverRefusal('http://localhost:80@evil.example/v1', 'k')).not.toBe('')
+  expect(serverRefusal('http://localhost.evil.example/v1', 'k')).not.toBe('')
+})
+
+test('the speech server voice for a language: its own, else the one without a language, else English\'s, else the first', () => {
+  expect(serverVoiceFor('', 'es')).toBe('alloy')
+  expect(serverVoiceFor('af_heart', 'es')).toBe('af_heart')
+  expect(serverVoiceFor('af_heart, es:ef_dora, fr:ff_siwis', 'fr')).toBe('ff_siwis')
+  expect(serverVoiceFor('ES: ef_dora , af_heart', 'es')).toBe('ef_dora')
+  expect(serverVoiceFor('es:ef_dora, af_heart', 'pt')).toBe('af_heart')
+  expect(serverVoiceFor('es:ef_dora, en:bf_emma', 'pt')).toBe('bf_emma')
+  expect(serverVoiceFor('es:ef_dora, it:if_sara', '')).toBe('ef_dora')
 })
 
 test('with no language set, the switch shows none and the narrator follows the request', async ($, on) => {

@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderNode, RenderViewport, Timer } from 'claude-code'
 
-import { LINUX, MACOS, MACOS_VOICES, QUEUE, WINDOWS, WINDOWS_VOICES, dispatcherRate, espeakWords, powershell } from './speaker'
+import { LINUX, MACOS, MACOS_VOICES, QUEUE, SERVER, SERVER_VOICES, WINDOWS, WINDOWS_VOICES, dispatcherRate, espeakWords, powershell, serverVoiceFor, serverVoicesIn } from './speaker'
 import { cut, finalQuestion, guessLanguage, parseNarration, plain, withQuestion } from './text'
 
 type Platform = 'macos' | 'windows' | 'linux' | 'other'
@@ -89,8 +89,10 @@ const sweepStep = atom({ plugin: 'narrator', key: 'sweepStep' } as const, 0)
 
 /** An answer this short is read out as it is: no model call to write a narration of it. */
 const SHORT_ANSWER = 200
+/** The model a speech server is asked for: OpenAI's name, which Kokoro-FastAPI also takes. */
+const SERVER_MODEL = 'tts-1'
 
-let settings = { voice: '', model: 'haiku', speed: SPEED, shortAnswer: SHORT_ANSWER, language: '', command: '' }
+let settings = { voice: '', model: 'haiku', speed: SPEED, shortAnswer: SHORT_ANSWER, language: '', command: '', server: '', serverVoice: '', serverModel: SERVER_MODEL, serverKey: '' }
 // The main loop's turn so far: the prompt that started it and each tool call it made.
 let request = ''
 let actions: string[] = []
@@ -197,8 +199,11 @@ function linuxSpeechOf ($: EngineInterface) {
 /** A speaker that first waits its turn in the line every window shares (PowerShell waits in its own). */
 const inLine = (command: Command): Command => ({ ...command, argv: ['sh', '-c', QUEUE, 'narrator-line', ...command.argv] })
 
-/** The programs that can say `text` here, best first; `ticket`, when it was ready, is its place in the line. */
-async function speakersFor ($: EngineInterface, text: string, language: string, voice: string, ticket: string): Promise<Command[]> {
+/**
+ * The programs that can say `text` here, best first; `ticket`, when it was ready, is its place in the
+ * line. `serverVoice`, a voice named for the speech server, else the setting's for the language.
+ */
+async function speakersFor ($: EngineInterface, text: string, language: string, voice: string, ticket: string, serverVoice = serverVoiceFor(settings.serverVoice, language)): Promise<Command[]> {
   const env = { NARRATOR_TEXT: text, NARRATOR_LANG: language, NARRATOR_VOICE: voice, NARRATOR_SPEED: String(settings.speed), NARRATOR_TICKET: ticket }
   const system = await platformOf($)
   // A speak command of the person's own, run by the shell with the narration as its last argument.
@@ -206,6 +211,17 @@ async function speakersFor ($: EngineInterface, text: string, language: string, 
     const argv = ['sh', '-c', LINUX, 'narrator', 'sh', '-c', `exec ${settings.command} "$1"`, 'narrator-command', text]
     return [inLine({ argv, env: { ...env, NARRATOR_SPEAKER: settings.command }, program: settings.command })]
   }
+  const speakers = await systemSpeakersFor($, system, env, text, language, voice)
+  if (!settings.server || system === 'windows') return speakers
+  // A speech server first, the system's voices after it, should it not answer.
+  const body = JSON.stringify({ model: settings.serverModel, input: text, voice: serverVoice, response_format: 'wav', speed: settings.speed })
+  const speaker = `${serverVoice} (speech server)`
+  const serverEnv = { ...env, NARRATOR_SERVER: settings.server, NARRATOR_BODY: body, NARRATOR_SPEAKER: speaker, NARRATOR_SERVER_KEY: settings.serverKey }
+  return [inLine({ argv: ['sh', '-c', LINUX, 'narrator', 'sh', '-c', SERVER, 'narrator-server'], env: serverEnv, program: 'speech server' }), ...speakers]
+}
+
+/** The system's own programs that can say `text`, best first. */
+async function systemSpeakersFor ($: EngineInterface, system: Platform, env: Record<string, string>, text: string, language: string, voice: string): Promise<Command[]> {
   if (system === 'macos') return [inLine({ argv: ['osascript', '-l', 'JavaScript', '-e', MACOS], env, program: 'osascript' })]
   if (system === 'windows') return [{ argv: powershell(WINDOWS), env, program: 'powershell' }]
   if (system !== 'linux') return []
@@ -302,6 +318,40 @@ async function listVoices ($: EngineInterface) {
   return sections.join('\n\n')
 }
 
+/**
+ * Why a speech server is not to be used, if it is not: a key would go to it in the clear, over http
+ * to another machine (RFC 6750 asks TLS of a bearer token). Over https, or to this machine by its
+ * loopback name or address (`localhost`, `127.x.x.x`, `[::1]`), it may. The URL is parsed, not
+ * matched as text, so `http://localhost@elsewhere` is elsewhere.
+ */
+export function serverRefusal (server: string, key: string) {
+  if (!server || !key) return ''
+  let url: URL
+  try {
+    url = new URL(server)
+  } catch {
+    return ''
+  }
+  const isLoopback = url.hostname === 'localhost' || /^127(?:\.\d{1,3}){3}$/.test(url.hostname) || url.hostname === '[::1]'
+  return url.protocol === 'http:' && !isLoopback ? `Narrator: the speech server key is not sent over plain http to ${url.hostname}; use https. The system's voice speaks meanwhile.` : ''
+}
+
+/** The speech server's voices, where one is set and it lists them; else what came of asking. Empty: no server. */
+async function listServerVoices ($: EngineInterface) {
+  if (!settings.server || (await platformOf($)) === 'windows') return ''
+  let answer = ''
+  try {
+    const env = { NARRATOR_SERVER: settings.server, NARRATOR_SERVER_KEY: settings.serverKey }
+    for await (const { text } of $.process.spawn({ argv: ['sh', '-c', SERVER_VOICES, 'narrator-voices'], env })) answer += text
+  } catch (error) {
+    $.ui.log(`narrator: speech server voices: ${message(error)}`, { to: 'debug' })
+  }
+  const voices = serverVoicesIn(answer)
+  return voices.length
+    ? `Speech server voices (${settings.server}; set them in Speech server voice, try one with /narrator test <voice>):\n${voices.join(', ')}`
+    : `Speech server (${settings.server}): it lists no voices at /audio/voices; its documentation names them.`
+}
+
 /** Shows on the switch whether this session's narration is speaking, and how many wait behind it; while it does, sweeps it. */
 async function showSpeech ($: EngineInterface) {
   const speaking = current?.isSpeaking ? { waiting: current.waiting ?? 0 } : null
@@ -361,10 +411,10 @@ async function play ($: EngineInterface, narration: Narration, command: Command)
 }
 
 /** Says `text` with the best speaker that works here, the engine's own synthesizer last; how, if it did. */
-async function speak ($: EngineInterface, narration: Narration, text: string, language: string, voice = settings.voice): Promise<Spoke | undefined> {
+async function speak ($: EngineInterface, narration: Narration, text: string, language: string, voice = settings.voice, serverVoice?: string): Promise<Spoke | undefined> {
   // Every window shares one line, so two sessions that finish together are said one after the other.
   const ticket = String(await $.clock.now()).padStart(13, '0')
-  for (const command of await speakersFor($, text, language, voice, ticket)) {
+  for (const command of await speakersFor($, text, language, voice, ticket, serverVoice)) {
     const spoke = await play($, narration, command)
     if (spoke || !narration.isActive) return spoke
   }
@@ -383,13 +433,16 @@ async function speak ($: EngineInterface, narration: Narration, text: string, la
   }
 }
 
-/** Says a short sample with `voice` (empty: the one picked for English), and what came of it. */
-async function testVoice ($: EngineInterface, voice: string) {
+/**
+ * Says a short sample with `voice` (empty: the one picked for English), and what came of it. `named`,
+ * a voice the person named, is also the one a speech server is asked for.
+ */
+async function testVoice ($: EngineInterface, voice: string, named = '') {
   silence()
   const narration: Narration = { isActive: true, abort: new AbortController() }
   current = narration
   try {
-    const spoke = await speak($, narration, PREVIEW, 'en', voice)
+    const spoke = await speak($, narration, PREVIEW, 'en', voice, named || undefined)
     if (!narration.isActive) return 'Narrator: preview stopped.'
     if (!spoke) return 'Narrator: could not play the voice preview.'
     if (spoke.isSkipped) return 'Narrator: not previewed, other sessions are speaking. Try again in a moment.'
@@ -583,13 +636,22 @@ export const register: Register = (on, options) => {
     speed: speed > 0 ? speed : SPEED,
     shortAnswer: shortAnswer >= 0 ? shortAnswer : SHORT_ANSWER,
     language: languageOf(options.language),
-    command: String(options.command ?? '').trim()
+    command: String(options.command ?? '').trim(),
+    // What comes before `/audio/speech` (`https://api.openai.com/v1`); a whole endpoint is taken too.
+    server: String(options.server ?? '').trim().replace(/\/+$/, '').replace(/\/audio\/speech$/, ''),
+    serverVoice: String(options.serverVoice ?? '').trim(),
+    serverModel: String(options.serverModel ?? '').trim() || SERVER_MODEL,
+    serverKey: String(options.serverKey ?? '').trim()
   }
+  // A key never goes in the clear to another machine: the server is left aside, and the session told.
+  const refusal = serverRefusal(settings.server, settings.serverKey)
+  if (refusal) settings.server = ''
 
   on('session.start', async ($, e, next) => {
     // A session nobody is at (`claude -p`: a script, a bot that runs Claude Code) is not narrated.
     isInteractive = e.isInteractive
     const asked = String(options.language ?? '').trim()
+    if (refusal && isInteractive) $.ui.toast(refusal)
     if (asked && !settings.language) $.ui.log(`narrator: "${cut(asked, 40)}" is not a language code (es, en, pt...): speaking the language you write in`, { to: 'debug' })
     await $.command.register({
       name: 'narrator',
@@ -611,16 +673,16 @@ export const register: Register = (on, options) => {
   on('command.run', { command: 'narrator' }, async ($, e) => {
     const arg = e.args.trim().toLowerCase()
     if (arg === 'voices') {
-      try {
-        return { text: await listVoices($) }
-      } catch (error) {
-        return { text: `Narrator: could not list voices. ${message(error)}` }
-      }
+      const [server, system] = await Promise.all([
+        listServerVoices($),
+        listVoices($).catch(error => `Narrator: could not list voices. ${message(error)}`)
+      ])
+      return { text: server ? `${server}\n\n${system}` : system }
     }
     const test = /^test(?:\s+([\s\S]+))?$/i.exec(e.args.trim())
     if (test) {
       const named = (test[1] ?? '').trim().replace(/^(['"])(.*)\1$/, '$2').trim()
-      return { text: await testVoice($, named || settings.voice) }
+      return { text: await testVoice($, named || settings.voice, named) }
     }
     if (arg === 'stop') {
       silence()
