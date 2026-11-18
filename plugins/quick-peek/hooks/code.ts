@@ -3,6 +3,8 @@
 // The window draws the tokens with a palette of its own; the terminal's card draws the lines with
 // the engine's own highlighter.
 
+import { nameOf } from './paths'
+
 /** A token's kind, the colour it takes: keyword or tag, string, number, comment, type, attribute or key, function; plain. */
 export type Kind = 'k' | 's' | 'n' | 'c' | 't' | 'a' | 'f' | ''
 export type Token = [Kind, string]
@@ -98,7 +100,7 @@ const BY_NAME: Record<string, Language> = {
 
 /** The language of the file at `path`, by its name or extension; none for what is no code nor text (an SVG is a picture). */
 export function languageOf (path: string): Language | undefined {
-  const name = path.slice(path.lastIndexOf('/') + 1).toLowerCase()
+  const name = nameOf(path).toLowerCase()
   if (BY_NAME[name]) return BY_NAME[name]
   if (name.startsWith('.env')) return BY_EXTENSION.env
   if (name.startsWith('dockerfile.') || name.endsWith('.dockerfile')) return BY_NAME.dockerfile
