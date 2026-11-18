@@ -11,13 +11,14 @@ const LINE = /:\d+(?::\d+)?$/
 // An address: never a path, nor the paths inside it.
 const URL = /\b[a-z][a-z0-9+.-]*:\/\/[^\s<>()]+/gi
 // Absolute, from home or explicitly relative; a relative path with a folder in it; a file name with
-// an extension. None starts inside a word, an address or another path.
+// an extension. The last two may start with a dot, as a hidden folder or file does (`.github/x`,
+// `.env.local`). None starts inside a word, an address or another path.
 const CANDIDATE = new RegExp(
   [
     String.raw`(?:~|\.{1,2})?\/[^\s\`'"<>()[\]{}|*]+`,
     String.raw`[A-Za-z]:\\[^\s\`'"<>()[\]{}|*]+`,
-    String.raw`[\w@+-][\w@.+-]*(?:\/[\w@.+-]+)+\/?`,
-    String.raw`[\w@+-][\w@.+-]*\.[A-Za-z][A-Za-z0-9]{0,9}`
+    String.raw`\.?[\w@+-][\w@.+-]*(?:\/[\w@.+-]+)+\/?`,
+    String.raw`\.?[\w@+-][\w@.+-]*\.[A-Za-z][A-Za-z0-9]{0,9}`
   ].map(source => `(?<![\\w/.~:\\\\@-])(?:${source})(?::\\d+(?::\\d+)?)?`).join('|'),
   'g'
 )
