@@ -32,7 +32,7 @@ Turn it off with the **Preview in a window** option (`/config`) to keep the prev
 
 ## In the terminal
 
-In Ghostty and kitty the terminal draws the picture itself, through the kitty graphics protocol. Elsewhere, without the window, it is drawn in colored block elements: each cell is sampled at eight by eight points, in linear light, and drawn with the half, eighth or quarter block (`▀ ▂ ▎ ▚ …`) that splits those points best, in their two colors, in any terminal with true color. Cells are coarse: a screenshot of text shows its layout, not text you can read.
+In Ghostty and kitty the terminal draws the picture itself, through the kitty graphics protocol, reading it from its file. The first card asks Claude Code whether the terminal drew it: one that cannot read the file (one in a sandbox with a `/tmp` of its own, as Ghostty installed as a Flatpak) is sent the picture's bytes instead, and one that draws no picture at all gets the window, or the cells. Elsewhere, without the window, it is drawn in colored block elements: each cell is sampled at eight by eight points, in linear light, and drawn with the half, eighth or quarter block (`▀ ▂ ▎ ▚ …`) that splits those points best, in their two colors, in any terminal with true color. Cells are coarse: a screenshot of text shows its layout, not text you can read.
 
 ```text
   12
@@ -78,6 +78,7 @@ One hooks module ([`hooks/register.tsx`](hooks/register.tsx)), a surface module 
 - Each `[Image #N]` is a `Client`: in the band, a chip it draws; in a sent prompt, an unpainted region laid over the `[Image #N]` Claude Code draws, in the prompt and in the rows under it. It posts when the pointer comes onto it, moves on it and leaves it, and when it is clicked; a `ui.message` hook opens and closes the preview, or opens the image.
 - In a window, a hover starts the system's program with `$.process.spawn`, told the picture, its largest side and how long it may stay (`IMAGE_PREVIEW_FILE`, `IMAGE_PREVIEW_SIZE`, `IMAGE_PREVIEW_LIFE`). It says `shown` once the window is up, then a `.` every tenth of a second, so the mod wakes to end it when the pointer leaves: it stops reading, and the program ends. One that ends without saying `shown` hands the previews back to the terminal.
 - In the terminal, a `ui.render` hook on every transcript row notes which of its rows show. The card is drawn `position: "absolute"` (out of the flow, so it moves nothing) in the row that holds it: the lowest on screen for a chip of the band, the sent prompt itself or the lowest row for its list. It covers only rows drawn before that row, never the `[Image #N]` that opened it. Only the row the card leaves and the one it joins draw again (a state family, one flag per row).
+- Where the terminal is sent the picture, the first card is sent again with `$.ui.blit`: taken, the terminal draws it; denied because the `Image` draws its `alt` there, the mod steps down, from the file to its bytes, then to the window or the cells.
 
 ## Development
 

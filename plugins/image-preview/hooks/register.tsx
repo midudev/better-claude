@@ -1,5 +1,5 @@
 import { atom, memberOf, read, update } from 'claude-code'
-import type { Elements, EngineInterface, EventOf, Register, RenderElement } from 'claude-code'
+import type { Elements, EngineInterface, EventOf, ImageSource, Register, RenderElement } from 'claude-code'
 
 import { fit, parseBmp, toCells } from './pixels'
 import type { Pixels } from './pixels'
@@ -50,6 +50,9 @@ const VIEW_BYTES = 2 * 1024 * 1024
 // The longest side of the picture in a window of its own, in points, and the most seconds it stays.
 const WINDOW_SIZE = 800
 const WINDOW_LIFE = 120
+// How long after a card is drawn the terminal is asked whether it draws its picture, and how often.
+const CHECK_MS = 100
+const CHECK_TRIES = 20
 
 /** The ids of the `[Image #N]` placeholders in a text, each once, in order. */
 export const idsIn = (text: string) => [...new Set([...text.matchAll(TOKEN)].map(match => Number(match[1])))]
@@ -61,8 +64,14 @@ const sizeOf = (bytes: number) =>
 
 // How the terminal draws the picture itself: Ghostty and kitty read the file; one Claude Code was
 // told draws pictures (CLAUDE_CODE_FORCE_TERMINAL_IMAGES) is sent its bytes; any other gets it in
-// colored cells.
+// colored cells. One found not to read the file is sent the bytes; one found to draw no picture,
+// none. Whether the terminal was seen drawing one, and whether it is being asked now.
 let graphics: 'none' | 'file' | 'bytes' = 'none'
+let isDrawing = false
+let isChecking = false
+// Whether a card may open in a window of its own here: the option on, a person at the terminal,
+// not over SSH.
+let canWindow = false
 let sessionId: string | undefined
 let folder: string | undefined
 let madeFolder: string | undefined
@@ -323,6 +332,17 @@ async function openImage ($: Engine, id: number) {
   await $.process.run(argv).catch(() => undefined)
 }
 
+/** The system whose program shows a card in a window of its own here, if any can. */
+async function windowSystem ($: Engine): Promise<Platform | undefined> {
+  // Under WSL the window is Windows', by the pointer: not WSLg's, which cannot tell where it is.
+  if (await wslOf($)) return 'windows'
+  const system = await platformOf($)
+  if (system === 'macos' || system === 'windows') return system
+  if (system !== 'linux' || !(await $.env.get('DISPLAY'))) return undefined
+  const tk = await $.process.run(['python3', '-c', 'import tkinter']).catch(() => undefined)
+  return tk?.exitCode === 0 ? 'linux' : undefined
+}
+
 /** The program that shows image `id` in a window of its own here, and what it is told. */
 async function windowCommand ($: Engine, id: number): Promise<Command | undefined> {
   const file = await fileFor($, id)
@@ -376,6 +396,14 @@ function closeWindow () {
   window = undefined
 }
 
+/** What the terminal is sent to draw image `id` itself: the PNG's name or its bytes; none for cells. */
+function sourceOf (picture: Exclude<Picture, { error: string }>, id: number): ImageSource | undefined {
+  if (!picture.png) return undefined
+  if (graphics === 'file') return { file: picture.png, format: 'png' }
+  const view = views.get(id)
+  return graphics === 'bytes' && view ? { png: view } : undefined
+}
+
 /**
  * The picture of image `id` in a bordered card, as large as the bounds allow, its caption under it.
  * It floats over the transcript, which shows through any cell it leaves unwritten: every line is
@@ -389,8 +417,7 @@ function card ({ Box, Image, Raster, Text }: Ui, all: Record<string, Picture>, i
   if ('error' in picture) return line(`${label} no preview: ${picture.error}`, bounds.columns)
 
   const { columns, rows } = fit(picture.width, picture.height, bounds.columns - CARD_COLUMNS, bounds.rows - CARD_ROWS)
-  const view = views.get(id)
-  const source = !picture.png ? undefined : graphics === 'file' ? { file: picture.png, format: 'png' as const } : view && { png: view }
+  const source = sourceOf(picture, id)
   const key = `${id}:${columns}x${rows}`
   let painted = cells.get(key)
   if (!source && painted === undefined) {
@@ -450,6 +477,64 @@ const isFromPrompt = (now: Shown) => /\/(sent|token):/.test(now.target)
 
 /** Where the card a target opened goes: a target is `<site>/<chip key>`, the site a sent prompt's for its chips. */
 const placeFor = (id: number, target: string) => placeOf(id, target, /\/chip:/.test(target) ? undefined : target.slice(0, target.indexOf('/')))
+
+/**
+ * Asks whether the terminal draws the picture of the card just drawn under `requestId`: sent to
+ * it again, the surface takes it, or says the Image draws its `alt` there. A terminal that cannot
+ * read the file (one in a sandbox, with a /tmp of its own, as Ghostty in a Flatpak) or that draws
+ * no picture at all steps down, till it draws one. Asked once a session, one card at a time.
+ */
+async function check ($: Engine, requestId: string, id: number) {
+  if (isDrawing || isChecking || graphics === 'none') return
+  isChecking = true
+  try {
+    for (let tries = 0; tries < CHECK_TRIES; tries++) {
+      // The card is there once its drawing is.
+      await $.clock.sleep(CHECK_MS)
+      const [now, all] = await Promise.all([read($, shown), read($, pictures)])
+      const picture = all[id]
+      const source = now?.id === id && now.edge !== 'window' && picture && !('error' in picture) ? sourceOf(picture, id) : undefined
+      if (!source) return
+      const { deny } = await $.ui.blit({ requestId, key: `image-${id}`, source })
+      if (deny === undefined) {
+        isDrawing = true
+        return
+      }
+      // Not drawn yet, or the terminal not yet asked whether it reads files: asked again.
+      if (!/\balt\b/.test(deny)) continue
+      $.ui.log(`image-preview: the terminal does not draw the ${'file' in source ? 'file' : 'bytes'} (${deny.slice(0, 300)})`, { to: 'debug' })
+      await stepDown($)
+      tries = 0
+    }
+  } finally {
+    isChecking = false
+  }
+}
+
+/**
+ * One step down from what the terminal does not draw: from the PNG's name to its bytes, which a
+ * terminal that cannot read the file still draws; from the bytes to a window of its own, or cells.
+ */
+async function stepDown ($: Engine) {
+  if (graphics === 'file') {
+    graphics = 'bytes'
+    const cache = `${await sessionFolder($)}/image-preview`
+    const sent: Record<string, Picture> = {}
+    for (const [key, picture] of Object.entries(await read($, pictures))) {
+      if ('error' in picture) continue
+      const out = `${cache}/${key}.view.png`
+      const view = await viewOf($, picture.file, out).catch(() => undefined)
+      if (view) views.set(Number(key), view)
+      sent[key] = view ? { ...picture, png: out } : picture
+    }
+    await update($, pictures, all => ({ ...all, ...sent }))
+    return
+  }
+  graphics = 'none'
+  windowing = canWindow ? await windowSystem($) : undefined
+  $.ui.invalidate('ui.render')
+  await change($, now => (now && now.edge !== 'window' ? placeFor(now.id, now.target) : now))
+}
 
 /** Notes a transcript row, and which of its rows show: before anything is awaited, so in the transcript's order. */
 function note (e: Row) {
@@ -575,6 +660,7 @@ async function float ($: Engine, e: Row, drawn: RenderElement, overlays: RenderE
         {card(ui, await read($, pictures), now.id, bounds)}
       </Box>
     )
+    void check($, e.requestId, now.id).catch(() => undefined)
   }
   return (
     <Box flexDirection="column">
@@ -613,20 +699,12 @@ export const register: Register = (on, options) => {
     const isNative = program === 'ghostty' || term === 'xterm-ghostty' || term === 'xterm-kitty' || kittyWindow !== undefined
     const isForced = /^(1|true|yes|on)$/i.test(forceImages ?? '')
     graphics = isNative ? 'file' : isForced ? 'bytes' : 'none'
+    isDrawing = false
     // Where the terminal cannot draw the picture itself, a card opens in a window of its own, by
     // the pointer, on the desktop the session runs on: not over SSH, where that is another machine's.
-    windowing = undefined
     const isRemote = sshConnection !== undefined || sshTty !== undefined
-    if (options.window !== false && graphics === 'none' && e.isInteractive && !isRemote) {
-      const system = await platformOf($)
-      if (system === 'macos' || system === 'windows') windowing = system
-      // Under WSL the window is Windows', by the pointer: not WSLg's, which cannot tell where it is.
-      if (await wslOf($)) windowing = 'windows'
-      else if (system === 'linux' && (await $.env.get('DISPLAY'))) {
-        const tk = await $.process.run(['python3', '-c', 'import tkinter']).catch(() => undefined)
-        if (tk?.exitCode === 0) windowing = 'linux'
-      }
-    }
+    canWindow = options.window !== false && e.isInteractive && !isRemote
+    windowing = canWindow && graphics === 'none' ? await windowSystem($) : undefined
     // A reload starts with an empty cache: read again what is in the box.
     await follow($)
     const [initialDraft, initialShown, box] = await Promise.all([read($, draft), read($, shown), $.prompt.read()])
@@ -750,6 +828,7 @@ export const register: Register = (on, options) => {
       columns: Math.max(8, Math.min(MAX_COLUMNS, e.props.bodyColumns)),
       rows: Math.max(4, Math.min(MAX_ROWS, e.props.maxRows - 1))
     }
+    if (inBand !== undefined) void check($, e.requestId, inBand).catch(() => undefined)
     return (
       <Box flexDirection="column">
         {below}
