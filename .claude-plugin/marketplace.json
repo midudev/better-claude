@@ -61,14 +61,14 @@
       "name": "quick-peek",
       "source": "./plugins/quick-peek",
       "description": "The paths in Claude's replies become links: hover one to preview it by the pointer, click it to show it in Finder (or your system's file manager).",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "category": "productivity"
     },
     {
       "name": "commit",
       "source": "./plugins/commit",
       "description": "/commit asks commit + push, commit only or a new branch, then splits your changes into Conventional Commits on Haiku 5.5.",
-      "version": "0.3.0",
+      "version": "0.3.1",
       "category": "productivity"
     },
     {
