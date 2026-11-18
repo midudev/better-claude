@@ -143,6 +143,70 @@ function Pick($voices) {
 
 $script:isSpeaking = $false
 
+# A person's own speaker. A child PowerShell runs it after taking the shared Windows line. Native
+# programs get the narration as their last argument, read from the environment without putting its
+# contents in code. Straight double quotes become typographic ones because Windows PowerShell 5.1
+# cannot preserve embedded quotes for native arguments. Batch files and cmd.exe only get
+# NARRATOR_TEXT: cmd.exe reparses quotes and
+# metacharacters in arguments, so no arbitrary narration is ever placed on its command line. The
+# command's output is hidden so it cannot be mistaken for this script's voice protocol. While it
+# runs this parent keeps ticking, so its reader can end the whole process tree at once. A failure
+# leaves the system synthesizer below to speak instead.
+function Speak-Command {
+  $speaker = "$env:NARRATOR_SPEAKER"
+  if (-not $speaker) { return $false }
+  $parseErrors = $null
+  $tokens = [Management.Automation.PSParser]::Tokenize('& ' + $speaker, [ref]$parseErrors)
+  $program = @($tokens | Where-Object { $_.Type -eq 'Command' -or $_.Type -eq 'String' } | Select-Object -First 1)[0].Content
+  if (-not $program) { return $false }
+  # PowerShell accepts extensionless commands, including names that resolve to a .cmd or .bat on
+  # PATH. Inspect the resolved executable so those commands never receive arbitrary text as an
+  # argument through cmd.exe either.
+  $resolved = Get-Command -Name $program -CommandType Application, ExternalScript -ErrorAction SilentlyContinue | Select-Object -First 1
+  $resolvedProgram = if ($resolved -and $resolved.Path) { $resolved.Path } else { $program }
+  $leaf = [IO.Path]::GetFileName($resolvedProgram).ToLowerInvariant()
+  $isBatch = [IO.Path]::GetExtension($leaf) -in @('.cmd', '.bat') -or $leaf -in @('cmd', 'cmd.exe')
+  $textArgument = if ($isBatch) { '' } else {
+    $env:NARRATOR_ARGUMENT = $text.Replace([char]34, [char]0x201D)
+    ' $env:NARRATOR_ARGUMENT'
+  }
+  $expression = '$global:LASTEXITCODE = $null; try { & ' + $speaker + $textArgument + '; if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) { exit $LASTEXITCODE } } catch { exit 1 }'
+  $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($expression))
+  $process = $null
+  $watchdog = $null
+  $worked = $false
+  try {
+    $hostPath = (Get-Process -Id $PID).Path
+    $process = Start-Process -FilePath $hostPath -ArgumentList @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encoded) -WindowStyle Hidden -PassThru
+    # If this supervisor is killed before its finally block runs, a separate watchdog still ends
+    # the speak command's whole tree instead of leaving it talking over the next narration.
+    $parentPid = $PID
+    $childPid = $process.Id
+    $watchExpression = 'while (Get-Process -Id ' + $parentPid + ' -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 100 }; & taskkill.exe /PID ' + $childPid + ' /T /F *> $null'
+    $watchEncoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($watchExpression))
+    $watchdog = Start-Process -FilePath $hostPath -ArgumentList @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $watchEncoded) -WindowStyle Hidden -PassThru
+    Say "voice $speaker"
+    while (-not $process.HasExited) {
+      Start-Sleep -Milliseconds 100
+      $process.Refresh()
+      if (-not $process.HasExited) { Tick }
+    }
+    $worked = $process.ExitCode -eq 0
+  } catch {}
+  finally {
+    if ($watchdog) {
+      try { if (-not $watchdog.HasExited) { $watchdog.Kill() } } catch {}
+      $watchdog.Dispose()
+    }
+    if ($process -and -not $process.HasExited) {
+      & taskkill.exe /PID $process.Id /T /F *> $null
+    }
+    if ($process) { $process.Dispose() }
+  }
+  if (-not $worked) { Say "fallback $speaker" }
+  return $worked
+}
+
 function Speak-OneCore {
   Add-Type -AssemblyName System.Runtime.WindowsRuntime
   $null = [Windows.Media.SpeechSynthesis.SpeechSynthesizer, Windows.Media.SpeechSynthesis, ContentType = WindowsRuntime]
@@ -252,11 +316,13 @@ function Tick {
 
 if (-not (Enter-Line)) { Say 'skipped'; exit 0 }
 try {
-  try {
-    Speak-OneCore
-  } catch {
-    if ($script:isSpeaking) { exit 0 }
-    try { Speak-Sapi } catch { if (-not $script:isSpeaking) { Say "error: $($_.Exception.Message)" } }
+  if (-not (Speak-Command)) {
+    try {
+      Speak-OneCore
+    } catch {
+      if ($script:isSpeaking) { exit 0 }
+      try { Speak-Sapi } catch { if (-not $script:isSpeaking) { Say "error: $($_.Exception.Message)" } }
+    }
   }
 } finally {
   Exit-Line
