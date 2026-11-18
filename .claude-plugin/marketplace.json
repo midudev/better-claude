@@ -5,7 +5,7 @@
     "url": "https://github.com/midudev"
   },
   "metadata": {
-    "description": "Claude Code plugins and mods by midudev: After, a prompt queue; Use Haiku and Think Hard, prompt prefixes for one turn; Token Meter, Sub Meter and Context Meter, tokens, subscription and context window usage at a glance; Image Preview, hover a pasted image to see it; Quick Peek, the paths in a reply become links to preview and show in Finder; Time Machine, a git snapshot of every turn to go back to; Commit, Conventional Commits and a push on Haiku; Narrator, Claude tells you out loud what it did"
+    "description": "Claude Code plugins and mods by midudev: After, a prompt queue; Use Haiku and Think Hard, prompt prefixes for one turn; Token Meter, Sub Meter and Context Meter, tokens, subscription and context window usage at a glance; Image Preview, hover a pasted image to see it; Quick Peek, the paths in a reply become links to preview and show in Finder; Time Machine, a git snapshot of every turn to go back to; Commit, Conventional Commits and a push on Haiku; Narrator, Claude tells you out loud what it did; Message Timestamps, when each prompt and reply was sent"
   },
   "plugins": [
     {
@@ -83,6 +83,13 @@
       "source": "./plugins/time-machine",
       "description": "Every turn that changes files is a git snapshot: /timeline puts the working tree back as before any turn, Bash changes included. Undoable.",
       "version": "0.1.3",
+      "category": "productivity"
+    },
+    {
+      "name": "message-timestamps",
+      "source": "./plugins/message-timestamps",
+      "description": "A gray timestamp above each prompt and reply: the time and how long ago, the date as messages age, the full date on hover.",
+      "version": "0.1.0",
       "category": "productivity"
     }
   ]
