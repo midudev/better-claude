@@ -243,21 +243,15 @@ function run () {
 }
 `
 
-const encodedCache = new Map<string, string>()
-
 /** A PowerShell script as `-EncodedCommand` takes it: UTF-16LE, base64. */
 function encodedCommand (script: string) {
-  const cached = encodedCache.get(script)
-  if (cached !== undefined) return cached
   const bytes = new Uint8Array(script.length * 2)
   for (let i = 0; i < script.length; i++) {
     const code = script.charCodeAt(i)
     bytes[i * 2] = code & 0xff
     bytes[i * 2 + 1] = code >> 8
   }
-  const encoded = bytes.toBase64()
-  encodedCache.set(script, encoded)
-  return encoded
+  return bytes.toBase64()
 }
 
 // Explorer takes `/select,` and the path as one argument, with quotes around the path alone.

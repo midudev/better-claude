@@ -5,7 +5,7 @@ import type { On } from 'claude-code'
 
 import { excerptOf, languageOf, tokenize } from './code'
 import { blocks, inline, items, wrap } from './markdown'
-import { lineOf, pathOfSpan, pathsIn, resolve } from './paths'
+import { lineOf, nameOf, pathOfSpan, pathsIn, resolve } from './paths'
 import { explorer } from './window'
 
 const VIDEO = '/Users/ana/videos/borrador.mp4'
@@ -94,6 +94,11 @@ test('from a Windows folder a path lands on a Windows path; the form Git Bash wr
   expect(resolve('D:\\videos\\a.mp4', app, home)).toBe('D:\\videos\\a.mp4')
   // Elsewhere a path from the root stays one.
   expect(resolve('/c/Users/ana', '/project/app', '/Users/ana')).toBe('/c/Users/ana')
+})
+
+test('a Windows path is called by its last part, and its language known by it', () => {
+  expect(['C:\\Users\\ana\\app\\README.md', 'C:/Users/ana/app/src/app.ts', 'D:\\', '/Users/ana/a\\b.txt'].map(nameOf)).toEqual(['README.md', 'app.ts', '', 'a\\b.txt'])
+  expect(['C:\\Users\\ana\\app\\Dockerfile', 'C:\\Users\\ana.b\\app\\.env.local'].map(path => languageOf(path)?.name)).toEqual(['Dockerfile', 'Environment'])
 })
 
 test('on Windows, Explorer is asked through PowerShell, for a window shown: a file selected, a folder opened', () => {

@@ -4,7 +4,7 @@ import { excerptOf, languageOf } from './code'
 import type { Excerpt } from './code'
 import { blocks, inline, items, markerOf, widthOf, wrap } from './markdown'
 import type { Item, Row, Run } from './markdown'
-import { lineOf, pathOfSpan, pathsIn, resolve } from './paths'
+import { lineOf, nameOf, pathOfSpan, pathsIn, resolve } from './paths'
 import { MACOS, explorer } from './window'
 
 type Engine = EngineInterface
@@ -209,7 +209,7 @@ const ago = (ms: number) => {
 
 /** The line the terminal shows over a path where no window can: what it is, and what a click does. */
 function cardOf (target: Target) {
-  const name = target.path.slice(target.path.lastIndexOf('/') + 1) || target.path
+  const name = nameOf(target.path) || target.path
   const what = target.stat.kind === 'dir' ? 'folder' : sizeOf(target.stat.size)
   return ` ${name} · ${what} · ${ago(target.stat.mtimeMs)} · click: show in folder `
 }

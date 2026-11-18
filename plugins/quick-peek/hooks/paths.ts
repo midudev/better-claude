@@ -60,6 +60,11 @@ export function pathOfSpan (code: string): string | undefined {
   return found.length === 1 && found[0]!.start === 0 && found[0]!.end === text.length ? found[0]!.target : undefined
 }
 
+/** What `path` is called: its last part, after a `/`, or after a `\` in a Windows path (`C:\…`). */
+export function nameOf (path: string) {
+  return path.slice((DRIVE.test(path) ? Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) : path.lastIndexOf('/')) + 1)
+}
+
 /**
  * Where `target` lands: home for `~`, the working folder for a relative path; `.` and `..`
  * folded, no trailing `/`. A Windows path stays as written; from a Windows folder (`C:\…`) a
