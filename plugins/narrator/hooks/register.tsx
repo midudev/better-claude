@@ -667,7 +667,7 @@ export const register: Register = (on, options) => {
 
   on('tool.call', async ($, e, next) => {
     const result = await next(e)
-    if (isNarratorEnabled && e.agentId === undefined && actions.length < MAX_ACTIONS && (isInteractive || await inDesktopApp($))) {
+    if (isNarratorEnabled && e.agentId === undefined && (isInteractive || await inDesktopApp($)) && actions.length < MAX_ACTIONS) {
       actions.push(describe(e) + (result.deny !== undefined ? ' (denied)' : result.isError ? ' (failed)' : ''))
     }
     return result
@@ -677,14 +677,15 @@ export const register: Register = (on, options) => {
     const result = await next(e)
     // Kept on or off, so `/narrator read` can read it whenever it is asked.
     if (e.agentId === undefined && e.reason === 'answer' && e.answer.trim()) lastAnswer = { answer: e.answer, request }
-    if (isNarratorEnabled && e.agentId === undefined && e.reason === 'answer' && e.answer.trim() && (isInteractive || await inDesktopApp($))) void narrate($, e.answer)
+    // The switch is read after the surfaces are asked for, so one turned off meanwhile stays quiet.
+    if (e.agentId === undefined && e.reason === 'answer' && e.answer.trim() && (isInteractive || await inDesktopApp($)) && isNarratorEnabled) void narrate($, e.answer)
     return result
   })
 
   on('command.run', { command: 'recap' }, async ($, e, next) => {
     silence()
     const result = await next(e)
-    if (isNarratorEnabled && result.text?.trim() && !NO_RECAP.test(result.text) && (isInteractive || await inDesktopApp($))) {
+    if (result.text?.trim() && !NO_RECAP.test(result.text) && (isInteractive || await inDesktopApp($)) && isNarratorEnabled) {
       actions = []
       void narrate($, result.text)
     }
