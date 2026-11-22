@@ -579,6 +579,14 @@ function roomOf (e: { surface: string; viewport?: RenderViewport }) {
   return e.viewport.columns - FOOTER_PADDING - FOOTER_GAP - MODE_LABEL - (hintWidth > 0 ? 1 + hintWidth : 0)
 }
 
+/**
+ * Whether the desktop app draws the session. It starts its sessions as not interactive, as
+ * `claude -p` does, yet someone is at them.
+ */
+async function inDesktopApp ($: EngineInterface) {
+  return (await $.session.surfaces()).includes('desktop')
+}
+
 export const register: Register = (on, options) => {
   // Whether someone is at the session. Until session.start says otherwise (a mod loaded in the middle
   // of a session does not see it), someone is.
@@ -659,7 +667,7 @@ export const register: Register = (on, options) => {
 
   on('tool.call', async ($, e, next) => {
     const result = await next(e)
-    if (isInteractive && isNarratorEnabled && e.agentId === undefined && actions.length < MAX_ACTIONS) {
+    if (isNarratorEnabled && e.agentId === undefined && actions.length < MAX_ACTIONS && (isInteractive || await inDesktopApp($))) {
       actions.push(describe(e) + (result.deny !== undefined ? ' (denied)' : result.isError ? ' (failed)' : ''))
     }
     return result
@@ -669,14 +677,14 @@ export const register: Register = (on, options) => {
     const result = await next(e)
     // Kept on or off, so `/narrator read` can read it whenever it is asked.
     if (e.agentId === undefined && e.reason === 'answer' && e.answer.trim()) lastAnswer = { answer: e.answer, request }
-    if (isInteractive && isNarratorEnabled && e.agentId === undefined && e.reason === 'answer' && e.answer.trim()) void narrate($, e.answer)
+    if (isNarratorEnabled && e.agentId === undefined && e.reason === 'answer' && e.answer.trim() && (isInteractive || await inDesktopApp($))) void narrate($, e.answer)
     return result
   })
 
   on('command.run', { command: 'recap' }, async ($, e, next) => {
     silence()
     const result = await next(e)
-    if (isInteractive && isNarratorEnabled && result.text?.trim() && !NO_RECAP.test(result.text)) {
+    if (isNarratorEnabled && result.text?.trim() && !NO_RECAP.test(result.text) && (isInteractive || await inDesktopApp($))) {
       actions = []
       void narrate($, result.text)
     }
