@@ -345,7 +345,8 @@ async function windowSystem ($: Engine): Promise<Platform | undefined> {
   const system = await platformOf($)
   if (system === 'macos' || system === 'windows') return system
   if (system !== 'linux' || !(await $.env.get('DISPLAY'))) return undefined
-  const tk = await $.process.run(['python3', '-c', 'import tkinter']).catch(() => undefined)
+  // Isolated (-I), here and for the window: Python must not import from the folder the session is in.
+  const tk = await $.process.run(['python3', '-I', '-c', 'import tkinter']).catch(() => undefined)
   return tk?.exitCode === 0 ? 'linux' : undefined
 }
 
@@ -363,7 +364,7 @@ async function windowCommand ($: Engine, id: number): Promise<Command | undefine
     await makeFolder($, cache)
     if (!(await convert($, name => shrink(name, file, out, 'png', `${WINDOW_SIZE}>`)))) return undefined
   }
-  return { argv: ['python3', '-c', LINUX], env: { ...env, IMAGE_PREVIEW_FILE: out } }
+  return { argv: ['python3', '-I', '-c', LINUX], env: { ...env, IMAGE_PREVIEW_FILE: out } }
 }
 
 /**

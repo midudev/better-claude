@@ -625,9 +625,9 @@ test('on Linux with a display and Tk, the window is Tk\'s, showing the picture s
   await w.clock.settle()
   await point(await band($), 'chip:1')
   await w.clock.advance(100)
-  expect(w.runs).toContainEqual(['python3', '-c', 'import tkinter'])
+  expect(w.runs).toContainEqual(['python3', '-I', '-c', 'import tkinter'])
   expect(w.runs).toContainEqual(['magick', `${FOLDER}/images/1.png`, '-resize', '800x800>', `PNG:${FOLDER}/image-preview/1.window.png`])
-  expect(w.windows[0]!.argv.slice(0, 2)).toEqual(['python3', '-c'])
+  expect(w.windows[0]!.argv.slice(0, 3)).toEqual(['python3', '-I', '-c'])
   expect(w.windows[0]!.env.IMAGE_PREVIEW_FILE).toBe(`${FOLDER}/image-preview/1.window.png`)
 })
 
@@ -693,7 +693,7 @@ test('under WSL the window is Windows\' PowerShell, its variables crossing over 
   expect(w.windows[0]!.argv.slice(0, 6)).toEqual(['powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand'])
   expect(w.windows[0]!.env.IMAGE_PREVIEW_FILE).toBe(`${FOLDER}/images/1.png`)
   expect(w.windows[0]!.env.WSLENV).toBe('WT_SESSION:IMAGE_PREVIEW_FILE/p:IMAGE_PREVIEW_SIZE:IMAGE_PREVIEW_LIFE')
-  expect(w.runs).not.toContainEqual(['python3', '-c', 'import tkinter'])
+  expect(w.runs).not.toContainEqual(['python3', '-I', '-c', 'import tkinter'])
 })
 
 test('under WSL without ImageMagick, Windows\' PowerShell shrinks the picture for the terminal', cells, async ($, on) => {
