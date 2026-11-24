@@ -3,7 +3,7 @@ import type { Elements, EngineInterface, EventOf, ImageSource, Register, RenderE
 
 import { fit, parseBmp, toCells } from './pixels'
 import type { Pixels } from './pixels'
-import { LINUX, MACOS, WINDOWS, WINDOWS_CONVERT, powershell } from './window'
+import { LINUX, MACOS, OPEN_FILE, WINDOWS, WINDOWS_CONVERT, powershell } from './window'
 import type { Picture, Shown } from '../types'
 
 type Engine = EngineInterface
@@ -328,7 +328,13 @@ async function openImage ($: Engine, id: number) {
     return
   }
   const system = await platformOf($)
-  const argv = system === 'macos' ? ['open', '-a', 'Preview', file] : system === 'windows' ? ['explorer', file.replaceAll('/', '\\')] : ['xdg-open', file]
+  // On Windows the file is handed to its app by the shell: `explorer <file>` would leave a new
+  // Explorer process behind (`/factory,…`, ~170 MB) on every click.
+  if (system === 'windows') {
+    await $.process.run(powershell(OPEN_FILE), { env: { IMAGE_PREVIEW_FILE: file.replaceAll('/', '\\') } }).catch(() => undefined)
+    return
+  }
+  const argv = system === 'macos' ? ['open', '-a', 'Preview', file] : ['xdg-open', file]
   await $.process.run(argv).catch(() => undefined)
 }
 
