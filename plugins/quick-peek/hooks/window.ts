@@ -254,20 +254,76 @@ function encodedCommand (script: string) {
   return bytes.toBase64()
 }
 
-// Explorer takes `/select,` and the path as one argument, with quotes around the path alone.
-// PowerShell hands it that line as written (QUICK_PEEK_ARGS), and asks for a window shown.
-const EXPLORER = String.raw`Start-Process explorer.exe -WindowStyle Normal -ArgumentList $env:QUICK_PEEK_ARGS`
+// Explorer is never started: `explorer.exe <path>` hands the window to a new Explorer process
+// (`/factory,{75dff2b7-…}`) that stays when the window is closed, ~170 MB each, one more per click,
+// and its window may come up hidden. The shell that runs is asked instead: a folder is opened by
+// Shell.Application, a path shown selected by SHOpenFolderAndSelectItems, as browsers' "Show in
+// folder" does, a file opens with its app. The running shell makes the window with the show flag
+// this program was started with, hidden as the engine starts it: the window of that folder is then
+// found among the shell's and shown, in front. The calls are compiled once into the temp folder,
+// then loaded from there: compiling takes a second.
+const EXPLORER = String.raw`
+$path = $env:QUICK_PEEK_PATH
+$isOpening = [bool]$env:QUICK_PEEK_OPEN
+if ($isOpening -and -not (Test-Path -LiteralPath $path -PathType Container)) { Invoke-Item -LiteralPath $path; exit 0 }
+$source = @'
+using System;
+using System.Runtime.InteropServices;
+public static class QuickPeekShell {
+  [DllImport("shell32.dll", CharSet = CharSet.Unicode)] static extern int SHParseDisplayName(string name, IntPtr context, out IntPtr list, uint asked, out uint found);
+  [DllImport("shell32.dll")] static extern int SHOpenFolderAndSelectItems(IntPtr folder, uint count, IntPtr[] items, uint flags);
+  [DllImport("ole32.dll")] static extern void CoTaskMemFree(IntPtr memory);
+  [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr window, int how);
+  [DllImport("user32.dll")] static extern bool IsIconic(IntPtr window);
+  [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr window);
+  [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
+  public static int Select (string path) {
+    IntPtr list; uint found;
+    int result = SHParseDisplayName(path, IntPtr.Zero, out list, 0, out found);
+    if (result != 0) return result;
+    try { return SHOpenFolderAndSelectItems(list, 0, null, 0); } finally { CoTaskMemFree(list); }
+  }
+  public static bool Show (IntPtr window) {
+    ShowWindow(window, IsIconic(window) ? 9 : 5);
+    SetForegroundWindow(window);
+    return IsWindowVisible(window);
+  }
+}
+'@
+$assembly = Join-Path $env:TEMP 'quick-peek-shell-2.dll'
+if (-not (Test-Path $assembly)) { try { Add-Type -OutputAssembly $assembly -OutputType Library -TypeDefinition $source } catch { } }
+try { Add-Type -Path $assembly } catch { Add-Type -TypeDefinition $source }
+$shell = New-Object -ComObject Shell.Application
+$folder = if ($isOpening) { $path } else { [IO.Path]::GetDirectoryName($path) }
+if (-not $folder) { $folder = $path }
+if ($isOpening) { $shell.Open($path) }
+else {
+  $result = [QuickPeekShell]::Select($path)
+  if ($result -ne 0) { exit $result }
+}
+$folder = $folder.TrimEnd('\')
+# Shown in two looks a tenth of a second apart: the shell may hide a new window once more as it fills it.
+$shown = 0
+for ($i = 0; $i -lt 30 -and $shown -lt 2; $i++) {
+  foreach ($window in $shell.Windows()) {
+    try { $at = $window.Document.Folder.Self.Path } catch { continue }
+    if ($at -and $at.TrimEnd('\') -eq $folder) {
+      if ([QuickPeekShell]::Show([IntPtr]$window.HWND)) { $shown++ } else { $shown = 0 }
+      break
+    }
+  }
+  Start-Sleep -Milliseconds 100
+}
+`
 
 /**
- * How Windows' Explorer is asked for `path`, a Windows path: opened (a folder in a window, a
- * file with its app), or its folder shown with it selected. Always through PowerShell:
- * Explorer run straight from the engine, whose programs start hidden, opens a hidden window;
- * and an argument that holds a space is quoted whole, and Explorer, given
- * `"/select,C:\My Videos\a.mp4"`, opens Documents. A Windows path holds no quote.
+ * How Windows' shell is asked for `path`, a Windows path: opened (a folder in a window, a file
+ * with its app), or its folder shown with it selected. Through PowerShell, the path in
+ * QUICK_PEEK_PATH, so no quoting reaches it.
  */
 export function explorer (path: string, isOpening: boolean): { argv: string[]; env: Record<string, string> } {
   return {
     argv: ['powershell', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encodedCommand(EXPLORER)],
-    env: { QUICK_PEEK_ARGS: isOpening ? `"${path}"` : `/select,"${path}"` }
+    env: isOpening ? { QUICK_PEEK_PATH: path, QUICK_PEEK_OPEN: '1' } : { QUICK_PEEK_PATH: path }
   }
 }

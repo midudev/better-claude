@@ -106,15 +106,19 @@ test('a Windows path is called by its last part, and its language known by it', 
   expect(['C:\\Users\\ana\\app\\Dockerfile', 'C:\\Users\\ana.b\\app\\.env.local'].map(path => languageOf(path)?.name)).toEqual(['Dockerfile', 'Environment'])
 })
 
-test('on Windows, Explorer is asked through PowerShell, for a window shown: a file selected, a folder opened', () => {
+test('on Windows, the running shell is asked through PowerShell, never a new Explorer: a file selected, a folder opened', () => {
   const file = 'C:\\Users\\ana\\My Videos\\a, b.mp4'
   const { argv, env } = explorer(file, false)
   expect(argv.slice(0, -1)).toEqual(['powershell', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand'])
   // The script, as `-EncodedCommand` takes it: UTF-16LE, base64.
   const bytes = Uint8Array.fromBase64(argv.at(-1)!)
-  expect(String.fromCharCode(...bytes.filter((_, i) => i % 2 === 0))).toBe('Start-Process explorer.exe -WindowStyle Normal -ArgumentList $env:QUICK_PEEK_ARGS')
-  expect(env).toEqual({ QUICK_PEEK_ARGS: `/select,"${file}"` })
-  expect(explorer('C:\\Users\\ana\\My Videos', true).env).toEqual({ QUICK_PEEK_ARGS: '"C:\\Users\\ana\\My Videos"' })
+  const script = String.fromCharCode(...bytes.filter((_, i) => i % 2 === 0))
+  expect(script).toContain('SHOpenFolderAndSelectItems')
+  expect(script).toContain('Shell.Application')
+  // `explorer.exe <path>` leaves an Explorer process behind on every click.
+  expect(script).not.toMatch(/Start-Process|explorer\.exe/i)
+  expect(env).toEqual({ QUICK_PEEK_PATH: file })
+  expect(explorer('C:\\Users\\ana\\My Videos', true).env).toEqual({ QUICK_PEEK_PATH: 'C:\\Users\\ana\\My Videos', QUICK_PEEK_OPEN: '1' })
 })
 
 test('a path with a line names it; a file of code or text is known by its name, and its lines are tokens', () => {

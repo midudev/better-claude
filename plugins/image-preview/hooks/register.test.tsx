@@ -674,7 +674,11 @@ test('on Windows a click opens the image in its own viewer', async ($, on) => {
   await ui.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'chip:1' })
   await ui.pointer({ type: 'up', x: 2, y: 0, button: 'left', in: 'chip:1' })
   await w.clock.settle()
-  expect(w.runs).toContainEqual(['explorer', '\\Users\\me\\AppData\\Local\\Temp\\claude\\-project-app\\s-1\\images\\1.png'])
+  // Through the shell, never a new Explorer: `explorer <file>` leaves its process behind.
+  expect(w.runs.some(argv => /^explorer/i.test(argv[0]!))).toBe(false)
+  const at = w.runs.findIndex((argv, i) => argv[0] === 'powershell' && !('IMAGE_PREVIEW_OUT' in w.runEnvs[i]!) && w.runEnvs[i]!.IMAGE_PREVIEW_FILE !== undefined)
+  expect(at).toBeGreaterThanOrEqual(0)
+  expect(w.runEnvs[at]).toEqual({ IMAGE_PREVIEW_FILE: '\\Users\\me\\AppData\\Local\\Temp\\claude\\-project-app\\s-1\\images\\1.png' })
 })
 
 // Under WSL the session is Linux, but the desktop, the pointer and the viewer are Windows'.

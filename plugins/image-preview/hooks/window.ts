@@ -253,3 +253,6 @@ export function encodedCommand (script: string) {
 
 /** How PowerShell runs one of these scripts: no profile, no prompts, no script policy in the way. */
 export const powershell = (script: string) => ['powershell', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encodedCommand(script)]
+
+/** Opens IMAGE_PREVIEW_FILE with its app, as a double-click does, without starting Explorer. */
+export const OPEN_FILE = 'Invoke-Item -LiteralPath $env:IMAGE_PREVIEW_FILE'
