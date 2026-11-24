@@ -322,16 +322,13 @@ async function fileFor ($: Engine, id: number) {
 async function openImage ($: Engine, id: number) {
   const file = await fileFor($, id)
   if (!file) return
-  if (await wslOf($)) {
-    const path = (await $.process.run(['wslpath', '-w', file]).catch(() => undefined))?.stdout.trim()
-    if (path) await $.process.run(['explorer.exe', path]).catch(() => undefined)
-    return
-  }
   const system = await platformOf($)
-  // On Windows the file is handed to its app by the shell: `explorer <file>` would leave a new
-  // Explorer process behind (`/factory,…`, ~170 MB) on every click.
-  if (system === 'windows') {
-    await $.process.run(powershell(OPEN_FILE), { env: { IMAGE_PREVIEW_FILE: file.replaceAll('/', '\\') } }).catch(() => undefined)
+  // On Windows, and under WSL, the file is handed to its app by the shell: `explorer <file>` would
+  // leave a new Explorer process behind (`/factory,…`, ~170 MB) on every click. Under WSL the path
+  // crosses over in its Windows form.
+  if (system === 'windows' || (await wslOf($))) {
+    const { argv, env } = await crossing($, { argv: powershell(OPEN_FILE), env: { IMAGE_PREVIEW_FILE: system === 'windows' ? file.replaceAll('/', '\\') : file } })
+    await $.process.run(argv, env && { env }).catch(() => undefined)
     return
   }
   const argv = system === 'macos' ? ['open', '-a', 'Preview', file] : ['xdg-open', file]

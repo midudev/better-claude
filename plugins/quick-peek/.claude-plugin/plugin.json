@@ -1,6 +1,6 @@
 {
   "name": "quick-peek",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "The paths in Claude's replies become links: hover one to preview it, click it to show it in Finder.",
   "author": {
     "name": "Miguel Ángel Durán (midudev)",

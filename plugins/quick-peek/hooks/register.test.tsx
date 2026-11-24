@@ -6,7 +6,7 @@ import type { On } from 'claude-code'
 import { excerptOf, languageOf, tokenize } from './code'
 import { blocks, inline, items, wrap } from './markdown'
 import { lineOf, nameOf, pathOfSpan, pathsIn, resolve } from './paths'
-import { explorer } from './window'
+import { SHELL_HELPER_FILE, explorer } from './window'
 
 const VIDEO = '/Users/ana/videos/borrador.mp4'
 const FOLDER = '/Users/ana/videos'
@@ -25,11 +25,14 @@ function world (on: On, { system = 'Darwin', env = {}, cwd = '/project/app' }: {
   mock.env(on, { HOME: '/Users/ana', ...env })
   const there: Record<string, 'file' | 'dir'> = { [VIDEO]: 'file', [FOLDER]: 'dir', [README]: 'file', [SOURCE]: 'file', [HIDDEN]: 'file' }
   const runs: string[][] = []
+  // The variables each run was given, in the order of `runs`.
+  const runEnvs: Record<string, string>[] = []
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: cwd }))
   on('session.root', () => ({ value: '/project/app' }))
   on('process.run', ($, e) => {
     runs.push([...e.argv])
+    runEnvs.push({ ...e.init?.env })
     const stdout = e.argv[0] === 'uname' ? `${system}\n` : e.argv[0] === 'wslpath' ? 'C:\\Users\\ana\\videos\\borrador.mp4\n' : ''
     return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
@@ -58,7 +61,7 @@ function world (on: On, { system = 'Darwin', env = {}, cwd = '/project/app' }: {
     const { Box } = $.ui.resolve(e)
     return <Box key="engine" />
   })
-  return { clock, runs, windows }
+  return { clock, runs, runEnvs, windows }
 }
 
 const startSession = ($: Engine) => $.session.start({ cwd: '/project/app', surface: 'terminal', isInteractive: true })
@@ -115,9 +118,23 @@ test('on Windows, the running shell is asked through PowerShell, never a new Exp
   const script = String.fromCharCode(...bytes.filter((_, i) => i % 2 === 0))
   expect(script).toContain('SHOpenFolderAndSelectItems')
   expect(script).toContain('Shell.Application')
-  // `explorer.exe <path>` leaves an Explorer process behind on every click.
-  expect(script).not.toMatch(/Start-Process|explorer\.exe/i)
-  expect(env).toEqual({ QUICK_PEEK_PATH: file })
+  // `explorer.exe <path>` leaves an Explorer process behind on every click: it is started only
+  // where the shell cannot be asked, PowerShell held to its constrained language among them.
+  expect(script.match(/Start-Process[^\n]*/g)).toEqual(['Start-Process explorer.exe -WindowStyle Normal -ArgumentList $arguments'])
+  expect(script).toContain("if ($ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage') { Start-Explorer }")
+  // The window is found by its folder as the shell writes it, shown without waiting on a thread
+  // that may hang, and the program ends by a deadline.
+  expect(script).toContain('$shell.NameSpace($folder).Self.Path')
+  expect(script).toContain('ShowWindowAsync(window')
+  expect(script).not.toMatch(/\bShowWindow\(/)
+  expect(script).toContain('[QuickPeekShell]::Deadline(')
+  // The helper's file is named by what it holds, and every path is taken as written.
+  expect(SHELL_HELPER_FILE).toMatch(/^quick-peek-shell-[0-9a-f]{8}\.dll$/)
+  expect(script).toContain(`Join-Path $env:TEMP '${SHELL_HELPER_FILE}'`)
+  expect(script).not.toMatch(/(Test-Path|Add-Type|Invoke-Item|Remove-Item) (-Path )?\$/)
+  // Opening is asked as '1' alone: another value left in the environment selects.
+  expect(script).toContain("$isOpening = $env:QUICK_PEEK_OPEN -eq '1'")
+  expect(env).toEqual({ QUICK_PEEK_PATH: file, QUICK_PEEK_OPEN: '0' })
   expect(explorer('C:\\Users\\ana\\My Videos', true).env).toEqual({ QUICK_PEEK_PATH: 'C:\\Users\\ana\\My Videos', QUICK_PEEK_OPEN: '1' })
 })
 
@@ -293,12 +310,16 @@ test('on Linux a click asks the file manager to select the path, with no window'
   expect(w.windows).toHaveLength(0)
 })
 
-test('under WSL a click selects the path in Explorer', async ($, on) => {
-  const w = world(on, { system: 'Linux', env: { WSL_DISTRO_NAME: 'Ubuntu' } })
+test('under WSL a click asks Windows\' shell through powershell.exe, the path in its Windows form, never a new Explorer', async ($, on) => {
+  const w = world(on, { system: 'Linux', env: { WSL_DISTRO_NAME: 'Ubuntu', WSLENV: 'WT_SESSION' } })
   await startSession($)
   const ui = await reply($, `Listo: ${VIDEO}`)
   await ui.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'path:0:0' })
   await ui.pointer({ type: 'up', x: 2, y: 0, button: 'left', in: 'path:0:0' })
   await w.clock.settle()
-  expect(w.runs).toContainEqual(['explorer.exe', '/select,C:\\Users\\ana\\videos\\borrador.mp4'])
+  expect(w.runs.some(argv => /^explorer/i.test(argv[0]!))).toBe(false)
+  const at = w.runs.findIndex(argv => argv[0] === 'powershell.exe')
+  const windows = 'C:\\Users\\ana\\videos\\borrador.mp4'
+  expect(w.runs[at]).toEqual(['powershell.exe', ...explorer(windows, false).argv.slice(1)])
+  expect(w.runEnvs[at]).toEqual({ QUICK_PEEK_PATH: windows, QUICK_PEEK_OPEN: '0', WSLENV: 'WT_SESSION:QUICK_PEEK_PATH:QUICK_PEEK_OPEN' })
 })

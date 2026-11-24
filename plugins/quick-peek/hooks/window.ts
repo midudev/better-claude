@@ -254,63 +254,138 @@ function encodedCommand (script: string) {
   return bytes.toBase64()
 }
 
-// Explorer is never started: `explorer.exe <path>` hands the window to a new Explorer process
-// (`/factory,{75dff2b7-…}`) that stays when the window is closed, ~170 MB each, one more per click,
-// and its window may come up hidden. The shell that runs is asked instead: a folder is opened by
-// Shell.Application, a path shown selected by SHOpenFolderAndSelectItems, as browsers' "Show in
-// folder" does, a file opens with its app. The running shell makes the window with the show flag
-// this program was started with, hidden as the engine starts it: the window of that folder is then
-// found among the shell's and shown, in front. The calls are compiled once into the temp folder,
-// then loaded from there: compiling takes a second.
-const EXPLORER = String.raw`
-$path = $env:QUICK_PEEK_PATH
-$isOpening = [bool]$env:QUICK_PEEK_OPEN
-if ($isOpening -and -not (Test-Path -LiteralPath $path -PathType Container)) { Invoke-Item -LiteralPath $path; exit 0 }
-$source = @'
+// What Windows' shell is asked through, compiled once into the temp folder and loaded from there:
+// compiling takes a second. Its file is named by what it holds, so a changed helper is never a
+// stale one loaded in its place.
+const SHELL_HELPER = String.raw`
 using System;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Threading;
 public static class QuickPeekShell {
   [DllImport("shell32.dll", CharSet = CharSet.Unicode)] static extern int SHParseDisplayName(string name, IntPtr context, out IntPtr list, uint asked, out uint found);
   [DllImport("shell32.dll")] static extern int SHOpenFolderAndSelectItems(IntPtr folder, uint count, IntPtr[] items, uint flags);
   [DllImport("ole32.dll")] static extern void CoTaskMemFree(IntPtr memory);
-  [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr window, int how);
+  [DllImport("user32.dll")] static extern bool ShowWindowAsync(IntPtr window, int how);
   [DllImport("user32.dll")] static extern bool IsIconic(IntPtr window);
-  [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr window);
   [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
+  [DllImport("user32.dll")] static extern bool IsHungAppWindow(IntPtr window);
+  [DllImport("user32.dll")] static extern bool BringWindowToTop(IntPtr window);
+  [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr window);
+  [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, IntPtr process);
+  [DllImport("user32.dll")] static extern bool AttachThreadInput(uint from, uint to, bool isAttached);
+  [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
   public static int Select (string path) {
     IntPtr list; uint found;
     int result = SHParseDisplayName(path, IntPtr.Zero, out list, 0, out found);
     if (result != 0) return result;
     try { return SHOpenFolderAndSelectItems(list, 0, null, 0); } finally { CoTaskMemFree(list); }
   }
+  public static bool IsVisible (IntPtr window) { return IsWindowVisible(window); }
+  // Shown without waiting on the window's thread, which may hang. Windows lets only the program in
+  // front bring another window in front: this one borrows its input for that moment.
   public static bool Show (IntPtr window) {
-    ShowWindow(window, IsIconic(window) ? 9 : 5);
-    SetForegroundWindow(window);
+    if (IsHungAppWindow(window)) return false;
+    ShowWindowAsync(window, IsIconic(window) ? 9 : 5);
+    IntPtr front = GetForegroundWindow();
+    if (front != window) {
+      uint mine = GetCurrentThreadId();
+      uint theirs = front == IntPtr.Zero ? 0 : GetWindowThreadProcessId(front, IntPtr.Zero);
+      bool isAttached = theirs != 0 && theirs != mine && AttachThreadInput(mine, theirs, true);
+      try { BringWindowToTop(window); SetForegroundWindow(window); } finally { if (isAttached) AttachThreadInput(mine, theirs, false); }
+    }
     return IsWindowVisible(window);
   }
+  // Ends this program after milliseconds, wherever it waits: an Explorer that hangs holds the
+  // shell's calls with it.
+  public static void Deadline (int milliseconds) {
+    Thread thread = new Thread(() => { Thread.Sleep(milliseconds); Process.GetCurrentProcess().Kill(); });
+    thread.IsBackground = true;
+    thread.Start();
+  }
 }
+`
+
+/** A short name for `text`, the same while it is: FNV-1a, 32 bits, in hex. */
+function fingerprint (text: string) {
+  let hash = 0x811c9dc5
+  for (let i = 0; i < text.length; i++) hash = Math.imul(hash ^ text.charCodeAt(i), 0x01000193) >>> 0
+  return hash.toString(16).padStart(8, '0')
+}
+
+/** The file in the temp folder the helper is compiled into. */
+export const SHELL_HELPER_FILE = `quick-peek-shell-${fingerprint(SHELL_HELPER)}.dll`
+
+// Explorer is not started: `explorer.exe <path>` hands the window to a new Explorer process
+// (`/factory,{75dff2b7-…}`) that stays when the window is closed, ~170 MB each, one more per click,
+// and its window may come up hidden. The shell that runs is asked instead: a folder is opened by
+// Shell.Application, a path shown selected by SHOpenFolderAndSelectItems, as browsers' "Show in
+// folder" does, a file opens with its app. The running shell makes the window with the show flag
+// this program was started with, hidden as the engine starts it: that window is then found among
+// the shell's and shown, in front.
+// Where the shell cannot be asked (PowerShell held to its constrained language, as AppLocker and
+// WDAC do; the helper's compiling blocked; no Shell.Application), Explorer is started as before:
+// its window shows, and its process stays.
+const EXPLORER = String.raw`
+$ErrorActionPreference = 'Stop'
+$path = $env:QUICK_PEEK_PATH
+$isOpening = $env:QUICK_PEEK_OPEN -eq '1'
+if ($isOpening -and -not (Test-Path -LiteralPath $path -PathType Container)) { Invoke-Item -LiteralPath $path; exit 0 }
+function Start-Explorer {
+  $arguments = if ($isOpening) { '"' + $path + '"' } else { '/select,"' + $path + '"' }
+  Start-Process explorer.exe -WindowStyle Normal -ArgumentList $arguments
+  exit 0
+}
+if ($ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage') { Start-Explorer }
+$source = @'
+${SHELL_HELPER}
 '@
-$assembly = Join-Path $env:TEMP 'quick-peek-shell-2.dll'
-if (-not (Test-Path $assembly)) { try { Add-Type -OutputAssembly $assembly -OutputType Library -TypeDefinition $source } catch { } }
-try { Add-Type -Path $assembly } catch { Add-Type -TypeDefinition $source }
-$shell = New-Object -ComObject Shell.Application
+try {
+  $assembly = Join-Path $env:TEMP '${SHELL_HELPER_FILE}'
+  # A file a compile left cut short loads as none: it is compiled again.
+  if (Test-Path -LiteralPath $assembly) { try { Add-Type -LiteralPath $assembly } catch { Remove-Item -LiteralPath $assembly -Force -ErrorAction SilentlyContinue } }
+  if (-not ('QuickPeekShell' -as [type])) {
+    try { Add-Type -OutputAssembly $assembly -OutputType Library -TypeDefinition $source; Add-Type -LiteralPath $assembly } catch { }
+    if (-not ('QuickPeekShell' -as [type])) { Add-Type -TypeDefinition $source }
+  }
+  [QuickPeekShell]::Deadline(15000)
+  $shell = New-Object -ComObject Shell.Application
+} catch { Start-Explorer }
 $folder = if ($isOpening) { $path } else { [IO.Path]::GetDirectoryName($path) }
 if (-not $folder) { $folder = $path }
-if ($isOpening) { $shell.Open($path) }
-else {
-  $result = [QuickPeekShell]::Select($path)
-  if ($result -ne 0) { exit $result }
-}
-$folder = $folder.TrimEnd('\')
-# Shown in two looks a tenth of a second apart: the shell may hide a new window once more as it fills it.
+# The shell's windows; none while Explorer is not answering.
+function Get-ShellWindows { try { @($shell.Windows()) } catch { @() } }
+# The windows there before: the shell may show the path in a new one.
+$known = @{}
+foreach ($window in Get-ShellWindows) { try { $known[[int64]$window.HWND] = $true } catch { } }
+if ($isOpening) { try { $shell.Open($path) } catch { Start-Explorer } }
+elseif ([QuickPeekShell]::Select($path) -ne 0) { Start-Explorer }
+# The folder as the shell writes it, in full: a path may be written short (C:\Users\JOHNDO~1).
+$target = $folder
+try { $self = $shell.NameSpace($folder).Self.Path; if ($self) { $target = $self } } catch { }
+$target = $target.TrimEnd('\')
+# The window shown: a new one of that folder; else one of that folder still hidden; else the one of
+# that folder; else, as none is called by that folder after a second, a new one. Shown in two looks
+# a tenth of a second apart, as the shell may hide a new window once more while it fills it. A
+# window that was there is watched a second, for a new one.
+$picked = [IntPtr]::Zero
 $shown = 0
-for ($i = 0; $i -lt 30 -and $shown -lt 2; $i++) {
-  foreach ($window in $shell.Windows()) {
-    try { $at = $window.Document.Folder.Self.Path } catch { continue }
-    if ($at -and $at.TrimEnd('\') -eq $folder) {
-      if ([QuickPeekShell]::Show([IntPtr]$window.HWND)) { $shown++ } else { $shown = 0 }
-      break
-    }
+for ($i = 0; $i -lt 30; $i++) {
+  $best = [IntPtr]::Zero
+  $rank = 0
+  foreach ($window in Get-ShellWindows) {
+    try { $handle = [int64]$window.HWND; $at = [string]$window.Document.Folder.Self.Path } catch { continue }
+    $isNew = -not $known.ContainsKey($handle)
+    $isThere = $at -and $at.TrimEnd('\') -eq $target
+    $score = if ($isThere -and $isNew) { 4 } elseif ($isThere -and -not [QuickPeekShell]::IsVisible([IntPtr]$handle)) { 3 } elseif ($isThere) { 2 } elseif ($isNew -and $i -ge 10) { 1 } else { 0 }
+    if ($score -gt $rank) { $best = [IntPtr]$handle; $rank = $score }
+  }
+  if ($rank -gt 0) {
+    if ($best -ne $picked) { $picked = $best; $shown = 0 }
+    if ($shown -ge 2 -and -not [QuickPeekShell]::IsVisible($best)) { $shown = 0 }
+    if ($shown -lt 2) { if ([QuickPeekShell]::Show($best)) { $shown++ } else { $shown = 0 } }
+    if ($shown -ge 2 -and ($rank -eq 4 -or $i -ge 10)) { break }
   }
   Start-Sleep -Milliseconds 100
 }
@@ -324,6 +399,6 @@ for ($i = 0; $i -lt 30 -and $shown -lt 2; $i++) {
 export function explorer (path: string, isOpening: boolean): { argv: string[]; env: Record<string, string> } {
   return {
     argv: ['powershell', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encodedCommand(EXPLORER)],
-    env: isOpening ? { QUICK_PEEK_PATH: path, QUICK_PEEK_OPEN: '1' } : { QUICK_PEEK_PATH: path }
+    env: { QUICK_PEEK_PATH: path, QUICK_PEEK_OPEN: isOpening ? '1' : '0' }
   }
 }

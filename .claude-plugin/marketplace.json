@@ -54,14 +54,14 @@
       "name": "image-preview",
       "source": "./plugins/image-preview",
       "description": "Hover a pasted [Image #N] to see the picture: above the prompt while you write, and on the prompts you sent.",
-      "version": "0.2.3",
+      "version": "0.2.4",
       "category": "productivity"
     },
     {
       "name": "quick-peek",
       "source": "./plugins/quick-peek",
       "description": "The paths in Claude's replies become links: hover one to preview it by the pointer, click it to show it in Finder (or your system's file manager).",
-      "version": "0.2.1",
+      "version": "0.2.2",
       "category": "productivity"
     },
     {

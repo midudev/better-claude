@@ -317,21 +317,25 @@ function swap (drawn: RenderElement, mine: RenderElement): RenderElement {
 /** Shows `path` in the system's file manager, selected; with `isOpening`, opens it instead. */
 async function reveal ($: Engine, path: string, isOpening: boolean) {
   const run = (argv: string[]) => $.process.run(argv).catch(() => undefined)
-  if (await wslOf($)) {
-    const windows = (await run(['wslpath', '-w', path]))?.stdout.trim()
-    if (windows) await run(isOpening ? ['explorer.exe', windows] : ['explorer.exe', `/select,${windows}`])
-    return
-  }
-  const system = await platformOf($)
+  const [system, isWsl] = await Promise.all([platformOf($), wslOf($)])
   if (system === 'macos') {
     await run(isOpening ? ['open', path] : ['open', '-R', path])
     return
   }
-  if (system === 'windows') {
+  if (system === 'windows' || isWsl) {
+    // Windows' shell is asked the same way under WSL, the path in its Windows form, PowerShell as
+    // `powershell.exe`, its variables crossing over through WSLENV.
+    const windows = isWsl ? (await run(['wslpath', '-w', path]))?.stdout.trim() : path.replaceAll('/', '\\')
+    if (!windows) return
     // A folder opens in its own window: selected, it would show in its parent's.
     const isFolder = (await statOf($, path))?.kind === 'dir'
-    const { argv, env } = explorer(path.replaceAll('/', '\\'), isOpening || isFolder)
-    await $.process.run(argv, { env }).catch(() => undefined)
+    const { argv, env } = explorer(windows, isOpening || isFolder)
+    if (!isWsl) {
+      await $.process.run(argv, { env }).catch(() => undefined)
+      return
+    }
+    const inherited = await $.env.get('WSLENV')
+    await $.process.run(['powershell.exe', ...argv.slice(1)], { env: { ...env, WSLENV: [inherited, ...Object.keys(env)].filter(Boolean).join(':') } }).catch(() => undefined)
     return
   }
   if (isOpening) {

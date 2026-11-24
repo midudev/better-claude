@@ -4,6 +4,7 @@ import type { Engine } from 'claude-code/testing'
 import type { ImageSource, On, RenderElement } from 'claude-code'
 
 import { fit, parseBmp, toCells } from './pixels'
+import { OPEN_FILE, powershell } from './window'
 
 const FOLDER = '/tmp/claude-501/-project-app/s-1'
 const RED = 0xff0000
@@ -676,7 +677,8 @@ test('on Windows a click opens the image in its own viewer', async ($, on) => {
   await w.clock.settle()
   // Through the shell, never a new Explorer: `explorer <file>` leaves its process behind.
   expect(w.runs.some(argv => /^explorer/i.test(argv[0]!))).toBe(false)
-  const at = w.runs.findIndex((argv, i) => argv[0] === 'powershell' && !('IMAGE_PREVIEW_OUT' in w.runEnvs[i]!) && w.runEnvs[i]!.IMAGE_PREVIEW_FILE !== undefined)
+  expect(OPEN_FILE).toBe('Invoke-Item -LiteralPath $env:IMAGE_PREVIEW_FILE')
+  const at = w.runs.findIndex(argv => argv.join(' ') === powershell(OPEN_FILE).join(' '))
   expect(at).toBeGreaterThanOrEqual(0)
   expect(w.runEnvs[at]).toEqual({ IMAGE_PREVIEW_FILE: '\\Users\\me\\AppData\\Local\\Temp\\claude\\-project-app\\s-1\\images\\1.png' })
 })
@@ -708,7 +710,7 @@ test('under WSL without ImageMagick, Windows\' PowerShell shrinks the picture fo
   expect(await ui.find({ key: 'image-1' })).toMatchObject({ type: 'Raster' })
 })
 
-test('under WSL a click opens the image in Windows\' viewer', async ($, on) => {
+test('under WSL a click opens the image in Windows\' viewer, through powershell.exe, never a new Explorer', async ($, on) => {
   const w = world(on, { draft: '[Image #1]', system: 'Linux', env: WSL })
   await startSession($)
   await w.clock.settle()
@@ -716,6 +718,10 @@ test('under WSL a click opens the image in Windows\' viewer', async ($, on) => {
   await ui.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'chip:1' })
   await ui.pointer({ type: 'up', x: 2, y: 0, button: 'left', in: 'chip:1' })
   await w.clock.settle()
-  expect(w.runs).toContainEqual(['explorer.exe', '\\\\wsl.localhost\\Ubuntu\\tmp\\claude-501\\-project-app\\s-1\\images\\1.png'])
+  expect(w.runs.some(argv => /^explorer/i.test(argv[0]!))).toBe(false)
+  // The path crosses over in its Windows form (`/p`), as WSL turns it.
+  const at = w.runs.findIndex(argv => argv.join(' ') === ['powershell.exe', ...powershell(OPEN_FILE).slice(1)].join(' '))
+  expect(at).toBeGreaterThanOrEqual(0)
+  expect(w.runEnvs[at]).toEqual({ IMAGE_PREVIEW_FILE: `${FOLDER}/images/1.png`, WSLENV: 'WT_SESSION:IMAGE_PREVIEW_FILE/p' })
   expect(w.runs.some(argv => argv[0] === 'xdg-open')).toBe(false)
 })
