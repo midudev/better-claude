@@ -59,7 +59,7 @@ function world (on: On, { inRepo = true } = {}) {
   on('ui.open', () => ({ value: { isPlaced: true } }))
   // Where the engine's ring landed: the moves the mod passed on
   const landed: (string | undefined)[] = []
-  on('ui.focus', ($, e) => {
+  on('ui.focus', { plugin: '*' }, ($, e) => {
     landed.push(e.element)
     return {}
   })
