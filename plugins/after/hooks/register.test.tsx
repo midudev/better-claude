@@ -75,7 +75,7 @@ function world (on: On) {
     panes.push(e)
     return { value: { isPlaced: true } }
   })
-  on('ui.focus', () => ({}))
+  on('ui.focus', { plugin: '*' }, () => ({}))
   // What the engine draws where the mod draws nothing
   on('ui.render', ($, e) => {
     const { Box } = $.ui.resolve(e)
