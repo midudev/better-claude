@@ -681,6 +681,8 @@ test("a subagent's turn and an interrupted turn are not narrated", async ($, on)
 
 test('a session nobody is at (claude -p) is not narrated: no model call, no speaker', async ($, on) => {
   const w = world(on, { store: { enabled: true } })
+  // A `-p` run draws nowhere.
+  on('session.surfaces', () => ({ value: [] }))
   await $.session.start({ cwd: '/project', surface: 'terminal', isInteractive: false })
   await turn($)
   await turn($, { answer: 'ok' })
@@ -689,6 +691,17 @@ test('a session nobody is at (claude -p) is not narrated: no model call, no spea
   expect(w.prompts).toHaveLength(0)
   expect(w.spoken).toHaveLength(0)
   expect(w.said).toHaveLength(0)
+})
+
+test('in the desktop app, whose sessions start as not interactive, the answer is narrated', async ($, on) => {
+  const w = world(on, { store: { enabled: true } })
+  on('session.surfaces', () => ({ value: ['desktop' as const] }))
+  await $.session.start({ cwd: '/project', surface: 'desktop', isInteractive: false })
+  const speech = w.nextSpeech()
+  await turn($)
+  await speech
+  expect(w.prompts).toHaveLength(1)
+  expect(w.spoken).toHaveLength(1)
 })
 
 test('a new prompt silences the narration on its way', async ($, on) => {

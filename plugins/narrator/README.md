@@ -24,7 +24,7 @@ When a turn ends, Haiku (at low effort, so it is quick) reads your request, the 
 | WSL | Windows' voices, through `powershell.exe`; Linux's where that does not run |
 | Linux | `spd-say` (speech-dispatcher, with whatever module it is set up with: espeak-ng, RHVoice, Piper...), else `espeak-ng` or `espeak` |
 
-A new prompt cuts the narration short. It stays on in your next sessions until you switch it off. A session nobody is at (`claude -p`, as a script or a bot that runs Claude Code uses) is not narrated.
+A new prompt cuts the narration short. It stays on in your next sessions until you switch it off. A session nobody is at (`claude -p`, as a script or a bot that runs Claude Code uses) is not narrated; one in the Claude desktop app is.
 
 ```text
 /narrator         switch on or off
